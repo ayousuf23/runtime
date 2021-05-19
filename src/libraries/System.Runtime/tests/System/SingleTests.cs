@@ -274,6 +274,14 @@ namespace System.Tests
             yield return new object[] { (-567.89f).ToString(), defaultStyle, null, -567.89f };
             yield return new object[] { "1E23", defaultStyle, null, 1E23f };
 
+            yield return new object[] { ".234", defaultStyle, null, 0.234f };
+            yield return new object[] { "9813.", defaultStyle, null, 9813.0f };
+
+            string inputForSingleWithDotAtMaxDigit = "6" + new string('1', 111) + ".";
+            yield return new object[] { inputForSingleWithDotAtMaxDigit, defaultStyle, null, Single.Parse(inputForSingleWithDotAtMaxDigit) };
+            string inputForSingleWithDotAfterMaxDigits = "1" + inputForSingleWithDotAtMaxDigit;
+            yield return new object[] { inputForSingleWithDotAfterMaxDigits, defaultStyle, null, Single.Parse(inputForSingleWithDotAfterMaxDigits) };
+
             yield return new object[] { (123.1f).ToString(), NumberStyles.AllowDecimalPoint, null, 123.1f };
             yield return new object[] { (1000.0f).ToString("N0"), NumberStyles.AllowThousands, null, 1000.0f };
 

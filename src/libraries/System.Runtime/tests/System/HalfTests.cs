@@ -666,6 +666,14 @@ namespace System.Tests
             yield return new object[] { (-567.89f).ToString(), defaultStyle, null, -567.89f };
             yield return new object[] { "1E23", defaultStyle, null, 1E23f };
 
+            yield return new object[] { ".234", defaultStyle, null, 0.234f };
+            yield return new object[] { "9813.", defaultStyle, null, 9813.0f };
+
+            string inputForHalfWithDotAtMaxDigit = "6" + new string('1', 18) + ".";
+            yield return new object[] { inputForHalfWithDotAtMaxDigit, defaultStyle, null, Half.Parse(inputForHalfWithDotAtMaxDigit) };
+            string inputForHalfWithDotAfterMaxDigits = "1" + inputForHalfWithDotAtMaxDigit;
+            yield return new object[] { inputForHalfWithDotAfterMaxDigits, defaultStyle, null, Half.Parse(inputForHalfWithDotAfterMaxDigits) };
+
             yield return new object[] { (123.1f).ToString(), NumberStyles.AllowDecimalPoint, null, 123.1f };
             yield return new object[] { (1000.0f).ToString("N0"), NumberStyles.AllowThousands, null, 1000.0f };
 

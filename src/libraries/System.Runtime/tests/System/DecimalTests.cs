@@ -789,6 +789,14 @@ namespace System.Tests
             yield return new object[] { (567.89m).ToString(), defaultStyle, null, 567.89m };
             yield return new object[] { (-567.89m).ToString(), defaultStyle, null, -567.89m };
 
+            yield return new object[] { ".234", defaultStyle, null, 0.234m };
+            yield return new object[] { "9813.", defaultStyle, null, 9813.0m };
+
+            string inputForDecimalWithDotAtMaxDigit = "6" + new string('1', 27) + ".";
+            yield return new object[] { inputForDecimalWithDotAtMaxDigit, defaultStyle, null, Decimal.Parse(inputForDecimalWithDotAtMaxDigit) };
+            string inputForDecimalWithDotAfterMaxDigits = "1" + inputForDecimalWithDotAtMaxDigit;
+            yield return new object[] { inputForDecimalWithDotAfterMaxDigits, defaultStyle, null, Decimal.Parse(inputForDecimalWithDotAfterMaxDigits) };
+
             yield return new object[] { "79228162514264337593543950335", defaultStyle, null, 79228162514264337593543950335m };
             yield return new object[] { "-79228162514264337593543950335", defaultStyle, null, -79228162514264337593543950335m };
             yield return new object[] { "79,228,162,514,264,337,593,543,950,335", NumberStyles.AllowThousands, customFormat3, 79228162514264337593543950335m };
