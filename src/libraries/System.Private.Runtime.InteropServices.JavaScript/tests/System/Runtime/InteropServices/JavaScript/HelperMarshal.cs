@@ -66,6 +66,22 @@ namespace System.Runtime.InteropServices.JavaScript.Tests
             _stringResource2 = s;
         }
 
+        private static string StoreArgumentAndReturnLiteral(string s)
+        {
+            _stringResource = $"s: {s} length: {s?.Length}";
+            return "1";
+        }
+
+        private static string StoreAndReturnNew(string s)
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.Append("Got:");
+            sb.Append(' ');
+            sb.Append(s);
+            _stringResource = sb.ToString();
+            return _stringResource;
+        }
+
         internal static string _marshalledString;
         private static string InvokeMarshalString()
         {

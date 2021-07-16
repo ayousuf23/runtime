@@ -205,6 +205,10 @@ CORJIT_FLAGS ZapInfo::ComputeJitFlags(CORINFO_METHOD_HANDLE handle)
     }
 #endif  // FEATURE_READYTORUN_COMPILER
 
+#ifdef ARM_SOFTFP
+    jitFlags.Set(CORJIT_FLAGS::CORJIT_FLAG_SOFTFP_ABI);
+#endif
+
     return jitFlags;
 }
 
@@ -417,6 +421,13 @@ void ZapInfo::CompileMethod()
         ThrowHR(E_NOTIMPL);
     }
 
+    if (GetCompileInfo()->IsUnmanagedCallConvMethod(m_currentMethodHandle))
+    {
+        if (m_zapper->m_pOpt->m_verbose)
+            m_zapper->Warning(W("ReadyToRun:  Methods with UnmanagedCallConvAttribute not implemented\n"));
+        ThrowHR(E_NOTIMPL);
+    }
+
     m_currentMethodInfo = CORINFO_METHOD_INFO();
     if (!getMethodInfo(m_currentMethodHandle, &m_currentMethodInfo))
     {
@@ -499,8 +510,8 @@ void ZapInfo::CompileMethod()
 
     CorJitResult res = CORJIT_SKIPPED;   // FAILED() returns true for this value
 
-    BYTE *pCode;
-    ULONG cCode;
+    uint8_t *pCode;
+    uint32_t cCode;
     bool  doNormalCompile = true;
 
 #ifdef ALLOW_SXS_JIT_NGEN
@@ -897,7 +908,7 @@ void ZapInfo::getGSCookie(GSCookie * pCookieVal, GSCookie ** ppCookieVal)
         offsetof(CORCOMPILE_EE_INFO_TABLE, gsCookie));
 }
 
-DWORD ZapInfo::getJitFlags(CORJIT_FLAGS* jitFlags, DWORD sizeInBytes)
+uint32_t ZapInfo::getJitFlags(CORJIT_FLAGS* jitFlags, uint32_t sizeInBytes)
 {
     _ASSERTE(jitFlags != NULL);
     _ASSERTE(sizeInBytes >= sizeof(m_jitFlags));
@@ -913,8 +924,8 @@ bool ZapInfo::runWithErrorTrap(void (*function)(void*), void* param)
 
 HRESULT ZapInfo::allocPgoInstrumentationBySchema(CORINFO_METHOD_HANDLE ftnHnd,
                                                  PgoInstrumentationSchema* pSchema,
-                                                 UINT32 countSchemaItems,
-                                                 BYTE** pInstrumentationData)
+                                                 uint32_t countSchemaItems,
+                                                 uint8_t** pInstrumentationData)
 {
     HRESULT hr;
 
@@ -996,8 +1007,9 @@ HRESULT ZapInfo::allocPgoInstrumentationBySchema(CORINFO_METHOD_HANDLE ftnHnd,
 
 HRESULT ZapInfo::getPgoInstrumentationResults(CORINFO_METHOD_HANDLE      ftnHnd,
                                               PgoInstrumentationSchema **pSchema,                    // pointer to the schema table which describes the instrumentation results (pointer will not remain valid after jit completes)
-                                              UINT32 *                   pCountSchemaItems,          // pointer to the count schema items
-                                              BYTE **                    pInstrumentationData)       // pointer to the actual instrumentation data (pointer will not remain valid after jit completes)
+                                              uint32_t *                 pCountSchemaItems,          // pointer to the count schema items
+                                              uint8_t **                 pInstrumentationData,       // pointer to the actual instrumentation data (pointer will not remain valid after jit completes)
+                                              PgoSource*                 pPgoSource)
 {
     _ASSERTE(pCountSchemaItems != nullptr);
     _ASSERTE(pInstrumentationData != nullptr);
@@ -1009,6 +1021,7 @@ HRESULT ZapInfo::getPgoInstrumentationResults(CORINFO_METHOD_HANDLE      ftnHnd,
     *pCountSchemaItems = 0;
     *pSchema = nullptr;
     *pInstrumentationData = nullptr;
+    *pPgoSource = PgoSource::Unknown;
 
     int32_t numRuns = 0;
 
@@ -1130,59 +1143,43 @@ HRESULT ZapInfo::getPgoInstrumentationResults(CORINFO_METHOD_HANDLE      ftnHnd,
     *pCountSchemaItems = pgoResults->m_schema.GetCount();
     *pSchema = pgoResults->m_schema.GetElements();
     *pInstrumentationData = pgoResults->pInstrumentationData;
+    *pPgoSource = PgoSource::IBC;
 
     return pgoResults->m_hr;
 }
 
-CORINFO_CLASS_HANDLE ZapInfo::getLikelyClass(
-    CORINFO_METHOD_HANDLE ftnHnd,
-    CORINFO_CLASS_HANDLE  baseHnd,
-    UINT32                ilOffset,
-    UINT32*               pLikelihood,
-    UINT32*               pNumberOfClasses)
-{
-    return NULL;
-}
-
-void ZapInfo::allocMem(
-    ULONG               hotCodeSize,    /* IN */
-    ULONG               coldCodeSize,   /* IN */
-    ULONG               roDataSize,     /* IN */
-    ULONG               xcptnsCount,    /* IN */
-    CorJitAllocMemFlag  flag,           /* IN */
-    void **             hotCodeBlock,   /* OUT */
-    void **             coldCodeBlock,  /* OUT */
-    void **             roDataBlock     /* OUT */
-    )
+void ZapInfo::allocMem(AllocMemArgs *pArgs)
 {
     bool optForSize = m_zapper->m_pOpt->m_compilerFlags.IsSet(CORJIT_FLAGS::CORJIT_FLAG_SIZE_OPT);
 
     UINT align = DEFAULT_CODE_ALIGN;
 
-    if ((flag & CORJIT_ALLOCMEM_FLG_16BYTE_ALIGN) && !IsReadyToRunCompilation()) align = max(align, 16);
+    if ((pArgs->flag & CORJIT_ALLOCMEM_FLG_16BYTE_ALIGN) && !IsReadyToRunCompilation()) align = max(align, 16);
 
-    m_pCode = ZapCodeBlob::NewAlignedBlob(m_pImage, NULL, hotCodeSize, align);
-    *hotCodeBlock = m_pCode->GetData();
+    m_pCode = ZapCodeBlob::NewAlignedBlob(m_pImage, NULL, pArgs->hotCodeSize, align);
+    pArgs->hotCodeBlock = m_pCode->GetData();
+    pArgs->hotCodeBlockRW = m_pCode->GetData();
 
-    if (coldCodeSize != 0)
+    if (pArgs->coldCodeSize != 0)
     {
         align = sizeof(DWORD);
 
-        m_pColdCode = ZapCodeBlob::NewAlignedBlob(m_pImage, NULL, coldCodeSize, align);
-        *coldCodeBlock = m_pColdCode->GetData();
+        m_pColdCode = ZapCodeBlob::NewAlignedBlob(m_pImage, NULL, pArgs->coldCodeSize, align);
+        pArgs->coldCodeBlock = m_pColdCode->GetData();
+        pArgs->coldCodeBlockRW = m_pColdCode->GetData();
     }
 
     //
     // Allocate data
     //
 
-    if (roDataSize > 0)
+    if (pArgs->roDataSize > 0)
     {
-        if (flag & CORJIT_ALLOCMEM_FLG_RODATA_16BYTE_ALIGN)
+        if (pArgs->flag & CORJIT_ALLOCMEM_FLG_RODATA_16BYTE_ALIGN)
         {
             align = 16;
         }
-        else if (optForSize || (roDataSize < 8))
+        else if (optForSize || (pArgs->roDataSize < 8))
         {
             align = TARGET_POINTER_SIZE;
         }
@@ -1190,35 +1187,36 @@ void ZapInfo::allocMem(
         {
             align = 8;
         }
-        m_pROData = ZapBlobWithRelocs::NewAlignedBlob(m_pImage, NULL, roDataSize, align);
-        *roDataBlock = m_pROData->GetData();
+        m_pROData = ZapBlobWithRelocs::NewAlignedBlob(m_pImage, NULL, pArgs->roDataSize, align);
+        pArgs->roDataBlock = m_pROData->GetData();
+        pArgs->roDataBlockRW = m_pROData->GetData();
     }
 
     if (m_pImage->m_stats)
     {
-        m_pImage->m_stats->m_nativeCodeSize     += hotCodeSize;
-        m_pImage->m_stats->m_nativeColdCodeSize += coldCodeSize;
-        m_pImage->m_stats->m_nativeRODataSize   += roDataSize;
+        m_pImage->m_stats->m_nativeCodeSize     += pArgs->hotCodeSize;
+        m_pImage->m_stats->m_nativeColdCodeSize += pArgs->coldCodeSize;
+        m_pImage->m_stats->m_nativeRODataSize   += pArgs->roDataSize;
 
         BOOL haveProfileData = CurrentMethodHasProfileData();
 
         if (haveProfileData)
         {
-            m_pImage->m_stats->m_nativeCodeSizeInProfiledMethods     += hotCodeSize;
-            m_pImage->m_stats->m_nativeColdCodeSizeInProfiledMethods += coldCodeSize;
+            m_pImage->m_stats->m_nativeCodeSizeInProfiledMethods     += pArgs->hotCodeSize;
+            m_pImage->m_stats->m_nativeColdCodeSizeInProfiledMethods += pArgs->coldCodeSize;
         }
 
-        if (coldCodeSize)
+        if (pArgs->coldCodeSize)
         {
             m_pImage->m_stats->m_NumHotColdAllocations++;
 
-            m_pImage->m_stats->m_nativeCodeSizeInSplitMethods     += hotCodeSize;
-            m_pImage->m_stats->m_nativeColdCodeSizeInSplitMethods += coldCodeSize;
+            m_pImage->m_stats->m_nativeCodeSizeInSplitMethods     += pArgs->hotCodeSize;
+            m_pImage->m_stats->m_nativeColdCodeSizeInSplitMethods += pArgs->coldCodeSize;
 
             if (haveProfileData)
             {
-                m_pImage->m_stats->m_nativeCodeSizeInSplitProfiledMethods     += hotCodeSize;
-                m_pImage->m_stats->m_nativeColdCodeSizeInSplitProfiledMethods += coldCodeSize;
+                m_pImage->m_stats->m_nativeCodeSizeInSplitProfiledMethods     += pArgs->hotCodeSize;
+                m_pImage->m_stats->m_nativeColdCodeSizeInSplitProfiledMethods += pArgs->coldCodeSize;
             }
         }
         else
@@ -1363,7 +1361,7 @@ void ZapInfo::reportFatalError(CorJitResult result)
 // For prejitted code we need to count how many funclet regions
 // we have so that we can allocate and sort a contiguous .rdata block.
 //
-void ZapInfo::reserveUnwindInfo(bool isFunclet, bool isColdCode, ULONG unwindSize)
+void ZapInfo::reserveUnwindInfo(bool isFunclet, bool isColdCode, uint32_t unwindSize)
 {
     // Nothing to do
 }
@@ -1393,12 +1391,12 @@ void ZapInfo::reserveUnwindInfo(bool isFunclet, bool isColdCode, ULONG unwindSiz
 //    funcKind        type of funclet (main method code, handler, filter)
 //
 void ZapInfo::allocUnwindInfo (
-        BYTE *              pHotCode,              /* IN */
-        BYTE *              pColdCode,             /* IN */
-        ULONG               startOffset,           /* IN */
-        ULONG               endOffset,             /* IN */
-        ULONG               unwindSize,            /* IN */
-        BYTE *              pUnwindBlock,          /* IN */
+        uint8_t *           pHotCode,              /* IN */
+        uint8_t *           pColdCode,             /* IN */
+        uint32_t            startOffset,           /* IN */
+        uint32_t            endOffset,             /* IN */
+        uint32_t            unwindSize,            /* IN */
+        uint8_t *           pUnwindBlock,          /* IN */
         CorJitFuncKind      funcKind               /* IN */
         )
 {
@@ -1489,12 +1487,12 @@ bool ZapInfo::logMsg(unsigned level, const char *fmt, va_list args)
 // ICorDynamicInfo
 //
 
-DWORD ZapInfo::getThreadTLSIndex(void **ppIndirection)
+uint32_t ZapInfo::getThreadTLSIndex(void **ppIndirection)
 {
     _ASSERTE(ppIndirection != NULL);
 
     *ppIndirection = NULL;
-    return (DWORD)-1;
+    return (uint32_t)-1;
 }
 
 const void * ZapInfo::getInlinedCallFrameVptr(void **ppIndirection)
@@ -1506,7 +1504,7 @@ const void * ZapInfo::getInlinedCallFrameVptr(void **ppIndirection)
     return NULL;
 }
 
-LONG * ZapInfo::getAddrOfCaptureThreadGlobal(void **ppIndirection)
+int32_t * ZapInfo::getAddrOfCaptureThreadGlobal(void **ppIndirection)
 {
     _ASSERTE(ppIndirection != NULL);
 
@@ -1583,7 +1581,10 @@ CORINFO_CLASS_HANDLE ZapInfo::embedClassHandle(CORINFO_CLASS_HANDLE handle,
 
     if (IsReadyToRunCompilation())
     {
-        _ASSERTE(!"embedClassHandle");
+        // This is supported by crossgen2
+        if (m_zapper->m_pOpt->m_verbose)
+            m_zapper->Warning(W("ReadyToRun: embedding class handle not supported\n"));
+
         ThrowHR(E_NOTIMPL);
     }
 
@@ -2397,6 +2398,13 @@ void ZapInfo::getCallInfo(CORINFO_RESOLVED_TOKEN * pResolvedToken,
 
     _ASSERTE(pResult);
 
+    if ((flags & CORINFO_CALLINFO_CALLVIRT) == 0 && pConstrainedResolvedToken != nullptr)
+    {
+        // Defer constrained call / ldftn instructions used for static virtual methods
+        // to runtime resolution.
+        ThrowHR(E_NOTIMPL);
+    }
+
     // Fill in the kind of the virtual call.
     // We set kindOnly=true since we don't want the EE to actually give us
     // a call stub - instead we want to generate an indirection ourselves.
@@ -2688,7 +2696,7 @@ CORINFO_CLASS_HANDLE ZapInfo::getStaticFieldCurrentClass(CORINFO_FIELD_HANDLE fi
     return NULL;
 }
 
-DWORD ZapInfo::getFieldThreadLocalStoreID(CORINFO_FIELD_HANDLE field,
+uint32_t ZapInfo::getFieldThreadLocalStoreID(CORINFO_FIELD_HANDLE field,
                                           void **ppIndirection)
 {
     _ASSERTE(ppIndirection != NULL);
@@ -2801,13 +2809,13 @@ InfoAccessType ZapInfo::emptyStringLiteral(void **ppValue)
     return IAT_PPVALUE;
 }
 
-void ZapInfo::recordCallSite(ULONG instrOffset, CORINFO_SIG_INFO *callSig, CORINFO_METHOD_HANDLE methodHandle)
+void ZapInfo::recordCallSite(uint32_t instrOffset, CORINFO_SIG_INFO *callSig, CORINFO_METHOD_HANDLE methodHandle)
 {
     return;
 }
 
-void ZapInfo::recordRelocation(void *location, void *target,
-                               WORD fRelocType, WORD slotNum, INT32 addlDelta)
+void ZapInfo::recordRelocation(void *location, void *locationRW, void *target,
+                               uint16_t fRelocType, uint16_t slotNum, int32_t addlDelta)
 {
     // Factor slotNum into the location address
     switch (fRelocType)
@@ -3009,7 +3017,7 @@ WORD ZapInfo::getRelocTypeHint(void * target)
 #endif
 }
 
-DWORD ZapInfo::getExpectedTargetArchitecture()
+uint32_t ZapInfo::getExpectedTargetArchitecture()
 {
     return IMAGE_FILE_MACHINE_NATIVE;
 }
@@ -3056,7 +3064,7 @@ void ZapInfo::getEEInfo(CORINFO_EE_INFO *pEEInfoOut)
     m_pEEJitInfo->getEEInfo(pEEInfoOut);
 }
 
-LPCWSTR ZapInfo::getJitTimeLogFilename()
+const char16_t * ZapInfo::getJitTimeLogFilename()
 {
     return m_pEEJitInfo->getJitTimeLogFilename();
 }
@@ -3093,7 +3101,7 @@ CorInfoHFAElemType ZapInfo::getHFAType(CORINFO_CLASS_HANDLE hClass)
 //
 
 void ZapInfo::getBoundaries(CORINFO_METHOD_HANDLE ftn, unsigned int *cILOffsets,
-                             DWORD **pILOffsets, ICorDebugInfo::BoundaryTypes *implicitBoundaries)
+                             uint32_t **pILOffsets, ICorDebugInfo::BoundaryTypes *implicitBoundaries)
 {
     m_pEEJitInfo->getBoundaries(ftn, cILOffsets, pILOffsets,
                                               implicitBoundaries);
@@ -3411,7 +3419,7 @@ const char* ZapInfo::getHelperName(CorInfoHelpFunc func)
     return m_pEEJitInfo->getHelperName(func);
 }
 
-int ZapInfo::appendClassName(__deref_inout_ecount(*pnBufLen) WCHAR** ppBuf, int* pnBufLen,
+int ZapInfo::appendClassName(__deref_inout_ecount(*pnBufLen) char16_t** ppBuf, int* pnBufLen,
                              CORINFO_CLASS_HANDLE    cls,
                              bool fNamespace,
                              bool fFullInst,
@@ -3430,7 +3438,7 @@ CorInfoInlineTypeCheck ZapInfo::canInlineTypeCheck (CORINFO_CLASS_HANDLE cls, Co
     return m_pEEJitInfo->canInlineTypeCheck(cls, source);
 }
 
-DWORD ZapInfo::getClassAttribs(CORINFO_CLASS_HANDLE cls)
+uint32_t ZapInfo::getClassAttribs(CORINFO_CLASS_HANDLE cls)
 {
     return m_pEEJitInfo->getClassAttribs(cls);
 }
@@ -3546,7 +3554,7 @@ unsigned ZapInfo::getArrayRank(CORINFO_CLASS_HANDLE cls)
     return m_pEEJitInfo->getArrayRank(cls);
 }
 
-void * ZapInfo::getArrayInitializationData(CORINFO_FIELD_HANDLE field, DWORD size)
+void * ZapInfo::getArrayInitializationData(CORINFO_FIELD_HANDLE field, uint32_t size)
 {
     if (m_pEEJitInfo->getClassModule(m_pEEJitInfo->getFieldClass(field)) != m_pImage->m_hModule)
         return NULL;
@@ -3928,7 +3936,7 @@ bool ZapInfo::isValidStringRef (
     return m_pEEJitInfo->isValidStringRef(tokenScope, token);
 }
 
-LPCWSTR ZapInfo::getStringLiteral (
+const char16_t* ZapInfo::getStringLiteral (
             CORINFO_MODULE_HANDLE       tokenScope,
             unsigned                    token,
             int*                        length)
@@ -3955,7 +3963,12 @@ unsigned ZapInfo::getMethodHash(CORINFO_METHOD_HANDLE ftn)
     return m_pEEJitInfo->getMethodHash(ftn);
 }
 
-DWORD ZapInfo::getMethodAttribs(CORINFO_METHOD_HANDLE ftn)
+bool ZapInfo::isJitIntrinsic(CORINFO_METHOD_HANDLE ftn)
+{
+    return m_pEEJitInfo->isJitIntrinsic(ftn);
+}
+
+uint32_t ZapInfo::getMethodAttribs(CORINFO_METHOD_HANDLE ftn)
 {
     DWORD result = m_pEEJitInfo->getMethodAttribs(ftn);
     return FilterNamedIntrinsicMethodAttribs(this, result, ftn, m_pEEJitInfo);
@@ -3980,7 +3993,7 @@ bool ZapInfo::getMethodInfo(CORINFO_METHOD_HANDLE ftn,CORINFO_METHOD_INFO* info)
 
 CorInfoInline ZapInfo::canInline(CORINFO_METHOD_HANDLE caller,
                                            CORINFO_METHOD_HANDLE callee,
-                                           DWORD* pRestrictions)
+                                           uint32_t* pRestrictions)
 {
     return m_pEEJitInfo->canInline(caller, callee, pRestrictions);
 
@@ -4059,7 +4072,36 @@ void ZapInfo::getMethodVTableOffset(CORINFO_METHOD_HANDLE method,
 
 bool ZapInfo::resolveVirtualMethod(CORINFO_DEVIRTUALIZATION_INFO * info)
 {
-    return m_pEEJitInfo->resolveVirtualMethod(info);
+    bool result = m_pEEJitInfo->resolveVirtualMethod(info);
+    if (result)
+    {
+        // First, cons up a suitable resolved token.
+        CORINFO_RESOLVED_TOKEN derivedResolvedToken = {};
+        info->resolvedTokenDevirtualizedMethod = derivedResolvedToken;
+
+        info->resolvedTokenDevirtualizedMethod.tokenScope   = getMethodModule(info->devirtualizedMethod);
+        info->resolvedTokenDevirtualizedMethod.tokenContext = MAKE_METHODCONTEXT(info->devirtualizedMethod);
+        info->resolvedTokenDevirtualizedMethod.token        = getMethodDefFromMethod(info->devirtualizedMethod);
+        info->resolvedTokenDevirtualizedMethod.tokenType    = CORINFO_TOKENKIND_DevirtualizedMethod;
+        info->resolvedTokenDevirtualizedMethod.hClass       = (CORINFO_CLASS_HANDLE)((size_t)info->exactContext & ~CORINFO_CONTEXTFLAGS_MASK);;
+        info->resolvedTokenDevirtualizedMethod.hMethod      = info->devirtualizedMethod;
+
+        // Then, if the method is on a valuetype, cons up a unboxed method resolution stub
+        info->resolvedTokenDevirtualizedUnboxedMethod = derivedResolvedToken;
+        bool unused;
+        CORINFO_METHOD_HANDLE unboxedMethod = getUnboxedEntry(info->devirtualizedMethod, &unused);
+        if (unboxedMethod != NULL)
+        {
+            info->resolvedTokenDevirtualizedUnboxedMethod.tokenScope   = getMethodModule(unboxedMethod);
+            info->resolvedTokenDevirtualizedUnboxedMethod.tokenContext = MAKE_METHODCONTEXT(unboxedMethod);
+            info->resolvedTokenDevirtualizedUnboxedMethod.token        = getMethodDefFromMethod(unboxedMethod);
+            info->resolvedTokenDevirtualizedUnboxedMethod.tokenType    = CORINFO_TOKENKIND_DevirtualizedMethod;
+            info->resolvedTokenDevirtualizedUnboxedMethod.hClass       = (CORINFO_CLASS_HANDLE)((size_t)info->exactContext & ~CORINFO_CONTEXTFLAGS_MASK);;
+            info->resolvedTokenDevirtualizedUnboxedMethod.hMethod      = unboxedMethod;
+        }
+    }
+
+    return result;
 }
 
 CORINFO_METHOD_HANDLE ZapInfo::getUnboxedEntry(
@@ -4162,7 +4204,7 @@ HRESULT ZapInfo::GetErrorHRESULT(struct _EXCEPTION_POINTERS *pExceptionPointers)
     return m_pEEJitInfo->GetErrorHRESULT(pExceptionPointers);
 }
 
-ULONG ZapInfo::GetErrorMessage(__in_ecount(bufferLength) LPWSTR buffer, ULONG bufferLength)
+uint32_t ZapInfo::GetErrorMessage(__in_ecount(bufferLength) char16_t* buffer, uint32_t bufferLength)
 {
     return m_pEEJitInfo->GetErrorMessage(buffer, bufferLength);
 }
@@ -4278,6 +4320,7 @@ BOOL ZapInfo::CurrentMethodHasProfileData()
     UINT32 size;
     ICorJitInfo::PgoInstrumentationSchema * pSchema;
     BYTE* pData;
-    return SUCCEEDED(getPgoInstrumentationResults(m_currentMethodHandle, &pSchema, &size, &pData));
+    ICorJitInfo::PgoSource pgoSource;
+    return SUCCEEDED(getPgoInstrumentationResults(m_currentMethodHandle, &pSchema, &size, &pData, &pgoSource));
 }
 

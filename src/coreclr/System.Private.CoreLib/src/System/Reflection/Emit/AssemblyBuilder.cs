@@ -26,6 +26,7 @@ using System.Globalization;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Runtime.Loader;
 using System.Security;
 using System.Threading;
 
@@ -103,6 +104,7 @@ namespace System.Reflection.Emit
 
         public override string Location => throw new NotSupportedException(SR.NotSupported_DynamicAssembly);
 
+        [RequiresAssemblyFiles("The code will throw for assemblies embedded in a single-file app")]
         public override string? CodeBase => throw new NotSupportedException(SR.NotSupported_DynamicAssembly);
 
         [RequiresUnreferencedCode("Types might be removed")]
@@ -160,6 +162,7 @@ namespace System.Reflection.Emit
         internal AssemblyBuilder(AssemblyName name,
                                  AssemblyBuilderAccess access,
                                  ref StackCrawlMark stackMark,
+                                 AssemblyLoadContext? assemblyLoadContext,
                                  IEnumerable<CustomAttributeBuilder>? unsafeAssemblyAttributes)
         {
             if (name == null)
@@ -189,6 +192,7 @@ namespace System.Reflection.Emit
             CreateDynamicAssembly(ObjectHandleOnStack.Create(ref name),
                                   new StackCrawlMarkHandle(ref stackMark),
                                   (int)access,
+                                  ObjectHandleOnStack.Create(ref assemblyLoadContext),
                                   ObjectHandleOnStack.Create(ref retAssembly));
             _internalAssemblyBuilder = (InternalAssemblyBuilder)retAssembly!;
 
@@ -241,7 +245,11 @@ namespace System.Reflection.Emit
         public static AssemblyBuilder DefineDynamicAssembly(AssemblyName name, AssemblyBuilderAccess access)
         {
             StackCrawlMark stackMark = StackCrawlMark.LookForMyCaller;
-            return InternalDefineDynamicAssembly(name, access, ref stackMark, null);
+            return InternalDefineDynamicAssembly(name,
+                                                 access,
+                                                 ref stackMark,
+                                                 AssemblyLoadContext.CurrentContextualReflectionContext,
+                                                 null);
         }
 
         [DynamicSecurityMethod] // Methods containing StackCrawlMark local var has to be marked DynamicSecurityMethod.
@@ -251,13 +259,18 @@ namespace System.Reflection.Emit
             IEnumerable<CustomAttributeBuilder>? assemblyAttributes)
         {
             StackCrawlMark stackMark = StackCrawlMark.LookForMyCaller;
-            return InternalDefineDynamicAssembly(name, access, ref stackMark, assemblyAttributes);
+            return InternalDefineDynamicAssembly(name,
+                                                 access,
+                                                 ref stackMark,
+                                                 AssemblyLoadContext.CurrentContextualReflectionContext,
+                                                 assemblyAttributes);
         }
 
         [DllImport(RuntimeHelpers.QCall, CharSet = CharSet.Unicode)]
         private static extern void CreateDynamicAssembly(ObjectHandleOnStack name,
                                                          StackCrawlMarkHandle stackMark,
                                                          int access,
+                                                         ObjectHandleOnStack assemblyLoadContext,
                                                          ObjectHandleOnStack retAssembly);
 
         private static readonly object s_assemblyBuilderLock = new object();
@@ -266,6 +279,7 @@ namespace System.Reflection.Emit
             AssemblyName name,
             AssemblyBuilderAccess access,
             ref StackCrawlMark stackMark,
+            AssemblyLoadContext? assemblyLoadContext,
             IEnumerable<CustomAttributeBuilder>? unsafeAssemblyAttributes)
         {
             lock (s_assemblyBuilderLock)
@@ -274,6 +288,7 @@ namespace System.Reflection.Emit
                 return new AssemblyBuilder(name,
                                            access,
                                            ref stackMark,
+                                           assemblyLoadContext,
                                            unsafeAssemblyAttributes);
             }
         }

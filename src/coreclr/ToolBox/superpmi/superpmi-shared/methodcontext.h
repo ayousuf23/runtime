@@ -1,7 +1,5 @@
-//
-// Copyright (c) Microsoft. All rights reserved.
-// Licensed under the MIT license. See LICENSE file in the project root for full license information.
-//
+// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
 
 //----------------------------------------------------------
 // MethodContext.h - Primary structure to store all the EE-JIT details required to replay creation of a method
@@ -45,6 +43,27 @@ const char* toString(CorInfoType cit);
 
 #define METHOD_IDENTITY_INFO_SIZE 0x10000 // We assume that the METHOD_IDENTITY_INFO_SIZE will not exceed 64KB
 
+// Special "jit flags" for noting some method context features
+
+enum EXTRA_JIT_FLAGS
+{
+    HAS_PGO = 63,
+    HAS_EDGE_PROFILE = 62,
+    HAS_CLASS_PROFILE = 61,
+    HAS_LIKELY_CLASS = 60,
+    HAS_STATIC_PROFILE = 59,
+    HAS_DYNAMIC_PROFILE = 58
+};
+
+// Asserts to catch changes in corjit flags definitions.
+
+static_assert((int)EXTRA_JIT_FLAGS::HAS_PGO == (int)CORJIT_FLAGS::CorJitFlag::CORJIT_FLAG_UNUSED36, "Jit Flags Mismatch");
+static_assert((int)EXTRA_JIT_FLAGS::HAS_EDGE_PROFILE == (int)CORJIT_FLAGS::CorJitFlag::CORJIT_FLAG_UNUSED35, "Jit Flags Mismatch");
+static_assert((int)EXTRA_JIT_FLAGS::HAS_CLASS_PROFILE == (int)CORJIT_FLAGS::CorJitFlag::CORJIT_FLAG_UNUSED34, "Jit Flags Mismatch");
+static_assert((int)EXTRA_JIT_FLAGS::HAS_LIKELY_CLASS == (int)CORJIT_FLAGS::CorJitFlag::CORJIT_FLAG_UNUSED33, "Jit Flags Mismatch");
+static_assert((int)EXTRA_JIT_FLAGS::HAS_STATIC_PROFILE == (int)CORJIT_FLAGS::CorJitFlag::CORJIT_FLAG_UNUSED32, "Jit Flags Mismatch");
+static_assert((int)EXTRA_JIT_FLAGS::HAS_DYNAMIC_PROFILE == (int)CORJIT_FLAGS::CorJitFlag::CORJIT_FLAG_UNUSED31, "Jit Flags Mismatch");
+
 class MethodContext
 {
 public:
@@ -57,14 +76,14 @@ private:
     void MethodInitHelper(unsigned char* buff, unsigned int totalLen);
     void MethodInitHelperFile(HANDLE hFile);
 
-    bool Initialize(int loadedCount, unsigned char* buff, DWORD size);
-    bool Initialize(int loadedCount, HANDLE hFile);
+    bool Initialize(int mcIndex, unsigned char* buff, DWORD size);
+    bool Initialize(int mcIndex, HANDLE hFile);
 
     int dumpMD5HashToBuffer(BYTE* pBuffer, int bufLen, char* buff, int len);
 
 public:
-    static bool Initialize(int loadedCount, unsigned char* buff, DWORD size, /* OUT */ MethodContext** ppmc);
-    static bool Initialize(int loadedCount, HANDLE hFile, /* OUT */ MethodContext** ppmc);
+    static bool Initialize(int mcIndex, unsigned char* buff, DWORD size, /* OUT */ MethodContext** ppmc);
+    static bool Initialize(int mcIndex, HANDLE hFile, /* OUT */ MethodContext** ppmc);
     ~MethodContext();
     void Destroy();
 
@@ -83,6 +102,8 @@ public:
 
     int dumpMethodIdentityInfoToBuffer(char* buff, int len, bool ignoreMethodName = false, CORINFO_METHOD_INFO* optInfo = nullptr, unsigned optFlags = 0);
     int dumpMethodMD5HashToBuffer(char* buff, int len, bool ignoreMethodName = false, CORINFO_METHOD_INFO* optInfo = nullptr, unsigned optFlags = 0);
+
+    bool hasPgoData(bool& hasEdgeProfile, bool& hasClassProfile, bool& hasLikelyClass, ICorJitInfo::PgoSource& pgoSource);
 
     void recGlobalContext(const MethodContext& other);
 
@@ -104,9 +125,25 @@ public:
     void dmpGetClassAttribs(DWORDLONG key, DWORD value);
     DWORD repGetClassAttribs(CORINFO_CLASS_HANDLE classHandle);
 
+    void recIsJitIntrinsic(CORINFO_METHOD_HANDLE ftn, bool result);
+    void dmpIsJitIntrinsic(DWORDLONG key, DWORD value);
+    bool repIsJitIntrinsic(CORINFO_METHOD_HANDLE ftn);
+
     void recGetMethodAttribs(CORINFO_METHOD_HANDLE methodHandle, DWORD attribs);
     void dmpGetMethodAttribs(DWORDLONG key, DWORD value);
     DWORD repGetMethodAttribs(CORINFO_METHOD_HANDLE methodHandle);
+
+    void recGetClassModule(CORINFO_CLASS_HANDLE cls, CORINFO_MODULE_HANDLE mod);
+    void dmpGetClassModule(DWORDLONG key, DWORDLONG value);
+    CORINFO_MODULE_HANDLE repGetClassModule(CORINFO_CLASS_HANDLE cls);
+
+    void recGetModuleAssembly(CORINFO_MODULE_HANDLE mod, CORINFO_ASSEMBLY_HANDLE assem);
+    void dmpGetModuleAssembly(DWORDLONG key, DWORDLONG value);
+    CORINFO_ASSEMBLY_HANDLE repGetModuleAssembly(CORINFO_MODULE_HANDLE mod);
+
+    void recGetAssemblyName(CORINFO_ASSEMBLY_HANDLE assem, const char* assemblyName);
+    void dmpGetAssemblyName(DWORDLONG key, DWORD value);
+    const char* repGetAssemblyName(CORINFO_ASSEMBLY_HANDLE assem);
 
     void recGetVars(CORINFO_METHOD_HANDLE ftn, ULONG32* cVars, ICorDebugInfo::ILVarInfo** vars, bool* extendOthers);
     void dmpGetVars(DWORDLONG key, const Agnostic_GetVars& value);
@@ -114,13 +151,13 @@ public:
 
     void recGetBoundaries(CORINFO_METHOD_HANDLE         ftn,
                           unsigned int*                 cILOffsets,
-                          DWORD**                       pILOffsets,
-                          ICorDebugInfo::BoundaryTypes* implictBoundaries);
+                          uint32_t**                       pILOffsets,
+                          ICorDebugInfo::BoundaryTypes* implicitBoundaries);
     void dmpGetBoundaries(DWORDLONG key, const Agnostic_GetBoundaries& value);
     void repGetBoundaries(CORINFO_METHOD_HANDLE         ftn,
                           unsigned int*                 cILOffsets,
-                          DWORD**                       pILOffsets,
-                          ICorDebugInfo::BoundaryTypes* implictBoundaries);
+                          uint32_t**                    pILOffsets,
+                          ICorDebugInfo::BoundaryTypes* implicitBoundaries);
 
     void recInitClass(CORINFO_FIELD_HANDLE   field,
                       CORINFO_METHOD_HANDLE  method,
@@ -156,13 +193,13 @@ public:
 
     void recCanInline(CORINFO_METHOD_HANDLE callerHnd,
                       CORINFO_METHOD_HANDLE calleeHnd,
-                      DWORD*                pRestrictions,
+                      uint32_t*                pRestrictions,
                       CorInfoInline         response,
                       DWORD                 exceptionCode);
     void dmpCanInline(DLDL key, const Agnostic_CanInline& value);
     CorInfoInline repCanInline(CORINFO_METHOD_HANDLE callerHnd,
                                CORINFO_METHOD_HANDLE calleeHnd,
-                               DWORD*                pRestrictions,
+                               uint32_t*             pRestrictions,
                                DWORD*                exceptionCode);
 
     void recResolveToken(CORINFO_RESOLVED_TOKEN* pResolvedToken, DWORD exceptionCode);
@@ -511,9 +548,9 @@ public:
     void dmpGetInlinedCallFrameVptr(DWORD key, DLDL value);
     const void* repGetInlinedCallFrameVptr(void** ppIndirection);
 
-    void recGetAddrOfCaptureThreadGlobal(void** ppIndirection, LONG* result);
+    void recGetAddrOfCaptureThreadGlobal(void** ppIndirection, int32_t* result);
     void dmpGetAddrOfCaptureThreadGlobal(DWORD key, DLDL value);
-    LONG* repGetAddrOfCaptureThreadGlobal(void** ppIndirection);
+    int32_t* repGetAddrOfCaptureThreadGlobal(void** ppIndirection);
 
     void recGetClassDomainID(CORINFO_CLASS_HANDLE cls, void** ppIndirection, unsigned result);
     void dmpGetClassDomainID(DWORDLONG key, DLD value);
@@ -569,9 +606,9 @@ public:
     void dmpIsValidStringRef(DLD key, DWORD value);
     bool repIsValidStringRef(CORINFO_MODULE_HANDLE module, unsigned metaTOK);
 
-    void recGetStringLiteral(CORINFO_MODULE_HANDLE module, unsigned metaTOK, int length, LPCWSTR result);
+    void recGetStringLiteral(CORINFO_MODULE_HANDLE module, unsigned metaTOK, int length, const char16_t* result);
     void dmpGetStringLiteral(DLD key, DD value);
-    LPCWSTR repGetStringLiteral(CORINFO_MODULE_HANDLE module, unsigned metaTOK, int* length);
+    const char16_t* repGetStringLiteral(CORINFO_MODULE_HANDLE module, unsigned metaTOK, int* length);
 
     void recGetHelperName(CorInfoHelpFunc funcNum, const char* result);
     void dmpGetHelperName(DWORD key, DWORD value);
@@ -666,13 +703,9 @@ public:
     void dmpAllocPgoInstrumentationBySchema(DWORDLONG key, const Agnostic_AllocPgoInstrumentationBySchema& value);
     HRESULT repAllocPgoInstrumentationBySchema(CORINFO_METHOD_HANDLE ftnHnd, ICorJitInfo::PgoInstrumentationSchema* pSchema, UINT32 countSchemaItems, BYTE** pInstrumentationData);
 
-    void recGetPgoInstrumentationResults(CORINFO_METHOD_HANDLE ftnHnd, ICorJitInfo::PgoInstrumentationSchema** pSchema, UINT32* pCountSchemaItems, BYTE** pInstrumentationData, HRESULT result);
+    void recGetPgoInstrumentationResults(CORINFO_METHOD_HANDLE ftnHnd, ICorJitInfo::PgoInstrumentationSchema** pSchema, UINT32* pCountSchemaItems, BYTE** pInstrumentationData, ICorJitInfo::PgoSource* pPgoSource, HRESULT result);
     void dmpGetPgoInstrumentationResults(DWORDLONG key, const Agnostic_GetPgoInstrumentationResults& value);
-    HRESULT repGetPgoInstrumentationResults(CORINFO_METHOD_HANDLE ftnHnd, ICorJitInfo::PgoInstrumentationSchema** pSchema, UINT32* pCountSchemaItems, BYTE** pInstrumentationData);
-
-    void recGetLikelyClass(CORINFO_METHOD_HANDLE ftnHnd, CORINFO_CLASS_HANDLE  baseHnd, UINT32 ilOffset, CORINFO_CLASS_HANDLE classHnd, UINT32* pLikelihood, UINT32* pNumberOfClasses);
-    void dmpGetLikelyClass(const Agnostic_GetLikelyClass& key, const Agnostic_GetLikelyClassResult& value);
-    CORINFO_CLASS_HANDLE repGetLikelyClass(CORINFO_METHOD_HANDLE ftnHnd, CORINFO_CLASS_HANDLE  baseHnd, UINT32 ilOffset, UINT32* pLikelihood, UINT32* pNumberOfClasses);
+    HRESULT repGetPgoInstrumentationResults(CORINFO_METHOD_HANDLE ftnHnd, ICorJitInfo::PgoInstrumentationSchema** pSchema, UINT32* pCountSchemaItems, BYTE** pInstrumentationData, ICorJitInfo::PgoSource* pPgoSource);
 
     void recMergeClasses(CORINFO_CLASS_HANDLE cls1, CORINFO_CLASS_HANDLE cls2, CORINFO_CLASS_HANDLE result);
     void dmpMergeClasses(DLDL key, DWORDLONG value);
@@ -756,7 +789,7 @@ public:
     CORINFO_CLASS_HANDLE repGetTypeInstantiationArgument(CORINFO_CLASS_HANDLE cls, unsigned index);
 
     void recAppendClassName(
-        CORINFO_CLASS_HANDLE cls, bool fNamespace, bool fFullInst, bool fAssembly, const WCHAR* result);
+        CORINFO_CLASS_HANDLE cls, bool fNamespace, bool fFullInst, bool fAssembly, const char16_t* result);
     void dmpAppendClassName(const Agnostic_AppendClassName& key, DWORD value);
     const WCHAR* repAppendClassName(CORINFO_CLASS_HANDLE cls, bool fNamespace, bool fFullInst, bool fAssembly);
 
@@ -871,7 +904,7 @@ private:
 };
 
 // ********************* Please keep this up-to-date to ease adding more ***************
-// Highest packet number: 188
+// Highest packet number: 192
 // *************************************************************************************
 enum mcPackets
 {
@@ -971,8 +1004,9 @@ enum mcPackets
     Packet_GetJitFlags                                   = 154, // Added 2/3/2016
     Packet_GetJitTimeLogFilename                         = 67,
     Packet_GetJustMyCodeHandle                           = 68,
-    Packet_GetLikelyClass                                = 182, // Added 9/27/2020
+    Retired10                                            = 182, // Added 9/27/2020 // was Packet_GetLikelyClass
     Packet_GetLocationOfThisType                         = 69,
+    Packet_IsJitIntrinsic                                = 192,
     Packet_GetMethodAttribs                              = 70,
     Packet_GetMethodClass                                = 71,
     Packet_GetMethodModule                               = 181, // Added 11/20/2020
@@ -1036,6 +1070,9 @@ enum mcPackets
     Packet_SigInstHandleMap                              = 184,
     Packet_AllocPgoInstrumentationBySchema               = 186, // Added 1/4/2021
     Packet_GetPgoInstrumentationResults                  = 187, // Added 1/4/2021
+    Packet_GetClassModule                                = 189, // Added 2/19/2021
+    Packet_GetModuleAssembly                             = 190, // Added 2/19/2021
+    Packet_GetAssemblyName                               = 191, // Added 2/19/2021
 
     PacketCR_AddressMap                        = 113,
     PacketCR_AllocGCInfo                       = 114,
@@ -1065,4 +1102,6 @@ enum mcPackets
     PacketCR_CrSigInstHandleMap                = 185,
 };
 
-#endif
+void SetDebugDumpVariables();
+
+#endif // _MethodContext

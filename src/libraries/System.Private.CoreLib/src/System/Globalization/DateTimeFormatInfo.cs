@@ -2409,7 +2409,7 @@ namespace System.Globalization
             if (isLetter)
             {
                 ch = Culture.TextInfo.ToLower(ch);
-                if (IsHebrewChar(ch) && TokenMask == TokenType.RegularTokenMask)
+                if (!GlobalizationMode.Invariant && IsHebrewChar(ch) && TokenMask == TokenType.RegularTokenMask)
                 {
                     if (TryParseHebrewNumber(ref str, out bool badFormat, out tokenValue))
                     {
@@ -2618,7 +2618,7 @@ namespace System.Globalization
             return Culture.CompareInfo.Compare(string1, offset1, length1, string2, offset2, length2, CompareOptions.IgnoreCase) == 0;
         }
 
-        internal class TokenHashValue
+        internal sealed class TokenHashValue
         {
             internal string tokenString;
             internal TokenType tokenType;

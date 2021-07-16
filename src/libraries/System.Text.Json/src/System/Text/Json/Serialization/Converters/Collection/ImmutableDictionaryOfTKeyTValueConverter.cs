@@ -2,6 +2,9 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+using System.Text.Json.Serialization.Metadata;
 
 namespace System.Text.Json.Serialization.Converters
 {
@@ -10,12 +13,22 @@ namespace System.Text.Json.Serialization.Converters
         where TCollection : IReadOnlyDictionary<TKey, TValue>
         where TKey : notnull
     {
+        [RequiresUnreferencedCode(IEnumerableConverterFactoryHelpers.ImmutableConvertersUnreferencedCodeMessage)]
+        public ImmutableDictionaryOfTKeyTValueConverter()
+        {
+        }
+
+        // Used by source-gen initialization for reflection-free serialization.
+        public ImmutableDictionaryOfTKeyTValueConverter(bool dummy) { }
+
         protected override void Add(TKey key, in TValue value, JsonSerializerOptions options, ref ReadStack state)
         {
             ((Dictionary<TKey, TValue>)state.Current.ReturnValue!)[key] = value;
         }
 
         internal override bool CanHaveIdMetadata => false;
+
+        internal override bool RequiresDynamicMemberAccessors => true;
 
         protected override void CreateCollection(ref Utf8JsonReader reader, ref ReadStack state)
         {
@@ -24,15 +37,9 @@ namespace System.Text.Json.Serialization.Converters
 
         protected override void ConvertCollection(ref ReadStack state, JsonSerializerOptions options)
         {
-            JsonClassInfo classInfo = state.Current.JsonClassInfo;
-
-            Func<IEnumerable<KeyValuePair<TKey, TValue>>, TCollection>? creator = (Func<IEnumerable<KeyValuePair<TKey, TValue>>, TCollection>?)classInfo.CreateObjectWithArgs;
-            if (creator == null)
-            {
-                creator = options.MemberAccessorStrategy.CreateImmutableDictionaryCreateRangeDelegate<TCollection, TKey, TValue>();
-                classInfo.CreateObjectWithArgs = creator;
-            }
-
+            Func<IEnumerable<KeyValuePair<TKey, TValue>>, TCollection>? creator =
+                (Func<IEnumerable<KeyValuePair<TKey, TValue>>, TCollection>?)state.Current.JsonTypeInfo.CreateObjectWithArgs;
+            Debug.Assert(creator != null);
             state.Current.ReturnValue = creator((Dictionary<TKey, TValue>)state.Current.ReturnValue!);
         }
 
@@ -44,6 +51,7 @@ namespace System.Text.Json.Serialization.Converters
                 enumerator = value.GetEnumerator();
                 if (!enumerator.MoveNext())
                 {
+                    enumerator.Dispose();
                     return true;
                 }
             }
@@ -52,8 +60,10 @@ namespace System.Text.Json.Serialization.Converters
                 enumerator = (IEnumerator<KeyValuePair<TKey, TValue>>)state.Current.CollectionEnumerator;
             }
 
-            JsonConverter<TKey> keyConverter = _keyConverter ??= GetKeyConverter(KeyType, options);
-            JsonConverter<TValue> valueConverter = _valueConverter ??= GetValueConverter(state.Current.JsonClassInfo.ElementClassInfo!);
+            JsonTypeInfo typeInfo = state.Current.JsonTypeInfo;
+            _keyConverter ??= GetConverter<TKey>(typeInfo.KeyTypeInfo!);
+            _valueConverter ??= GetConverter<TValue>(typeInfo.ElementTypeInfo!);
+
             do
             {
                 if (ShouldFlush(writer, ref state))
@@ -67,11 +77,11 @@ namespace System.Text.Json.Serialization.Converters
                     state.Current.PropertyState = StackFramePropertyState.Name;
 
                     TKey key = enumerator.Current.Key;
-                    keyConverter.WriteWithQuotes(writer, key, options, ref state);
+                    _keyConverter.WriteWithQuotes(writer, key, options, ref state);
                 }
 
                 TValue element = enumerator.Current.Value;
-                if (!valueConverter.TryWrite(writer, element, options, ref state))
+                if (!_valueConverter.TryWrite(writer, element, options, ref state))
                 {
                     state.Current.CollectionEnumerator = enumerator;
                     return false;
@@ -80,7 +90,16 @@ namespace System.Text.Json.Serialization.Converters
                 state.Current.EndDictionaryElement();
             } while (enumerator.MoveNext());
 
+            enumerator.Dispose();
             return true;
+        }
+
+        [UnconditionalSuppressMessage("ReflectionAnalysis", "IL2026:RequiresUnreferencedCode",
+            Justification = "The ctor is marked RequiresUnreferencedCode.")]
+        internal override void Initialize(JsonSerializerOptions options, JsonTypeInfo? jsonTypeInfo = null)
+        {
+            Debug.Assert(jsonTypeInfo != null);
+            jsonTypeInfo.CreateObjectWithArgs = options.MemberAccessorStrategy.CreateImmutableDictionaryCreateRangeDelegate<TCollection, TKey, TValue>();
         }
     }
 }

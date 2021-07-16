@@ -62,7 +62,7 @@ namespace System.Reflection
     internal delegate R Getter<T, R>(T _this);
 
     [StructLayout(LayoutKind.Sequential)]
-    internal class RuntimePropertyInfo : PropertyInfo
+    internal sealed class RuntimePropertyInfo : PropertyInfo
     {
 #pragma warning disable 649
         internal IntPtr klass;
@@ -129,14 +129,6 @@ namespace System.Reflection
         internal RuntimeType GetDeclaringTypeInternal()
         {
             return (RuntimeType)DeclaringType;
-        }
-
-        private RuntimeType ReflectedTypeInternal
-        {
-            get
-            {
-                return (RuntimeType)ReflectedType;
-            }
         }
 
         internal RuntimeModule GetRuntimeModule()

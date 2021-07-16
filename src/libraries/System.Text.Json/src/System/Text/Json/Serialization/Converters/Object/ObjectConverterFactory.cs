@@ -4,15 +4,26 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
+using System.Text.Json.Serialization.Metadata;
 
 namespace System.Text.Json.Serialization.Converters
 {
     /// <summary>
     /// Converter factory for all object-based types (non-enumerable and non-primitive).
     /// </summary>
-    internal class ObjectConverterFactory : JsonConverterFactory
+    internal sealed class ObjectConverterFactory : JsonConverterFactory
     {
+        // Need to toggle this behavior when generating converters for F# struct records.
+        private readonly bool _useDefaultConstructorInUnannotatedStructs;
+
+        [RequiresUnreferencedCode(JsonSerializer.SerializationUnreferencedCodeMessage)]
+        public ObjectConverterFactory(bool useDefaultConstructorInUnannotatedStructs = true)
+        {
+            _useDefaultConstructorInUnannotatedStructs = useDefaultConstructorInUnannotatedStructs;
+        }
+
         public override bool CanConvert(Type typeToConvert)
         {
             // This is the last built-in factory converter, so if the IEnumerableConverterFactory doesn't
@@ -21,6 +32,8 @@ namespace System.Text.Json.Serialization.Converters
             return true;
         }
 
+        [UnconditionalSuppressMessage("ReflectionAnalysis", "IL2067:UnrecognizedReflectionPattern",
+            Justification = "The ctor is marked RequiresUnreferencedCode.")]
         public override JsonConverter CreateConverter(Type typeToConvert, JsonSerializerOptions options)
         {
             if (IsKeyValuePair(typeToConvert))
@@ -44,7 +57,7 @@ namespace System.Text.Json.Serialization.Converters
 
                 if (parameterCount <= JsonConstants.UnboxedParameterCountThreshold)
                 {
-                    Type placeHolderType = JsonClassInfo.ObjectType;
+                    Type placeHolderType = JsonTypeInfo.ObjectType;
                     Type[] typeArguments = new Type[JsonConstants.UnboxedParameterCountThreshold + 1];
 
                     typeArguments[0] = typeToConvert;
@@ -108,7 +121,8 @@ namespace System.Text.Json.Serialization.Converters
             return converter;
         }
 
-        private ConstructorInfo? GetDeserializationConstructor(Type type)
+        private ConstructorInfo? GetDeserializationConstructor(
+            [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors)] Type type)
         {
             ConstructorInfo? ctorWithAttribute = null;
             ConstructorInfo? publicParameterlessCtor = null;
@@ -156,7 +170,7 @@ namespace System.Text.Json.Serialization.Converters
             }
 
             // Structs will use default constructor if attribute isn't used.
-            if (type.IsValueType && ctorWithAttribute == null)
+            if (_useDefaultConstructorInUnannotatedStructs && type.IsValueType && ctorWithAttribute == null)
             {
                 return null;
             }

@@ -708,12 +708,6 @@ mono_cominterop_init (void)
 #ifndef DISABLE_COM
 
 void
-mono_cominterop_cleanup (void)
-{
-	mono_os_mutex_destroy (&cominterop_mutex);
-}
-
-void
 mono_mb_emit_cominterop_get_function_pointer (MonoMethodBuilder *mb, MonoMethod *method)
 {
 #ifndef DISABLE_JIT
@@ -1795,7 +1789,7 @@ ves_icall_System_ComObject_CreateRCW (MonoReflectionTypeHandle ref_type, MonoErr
 	 * is called by the corresponding real proxy to create the real RCW.
 	 * Constructor does not need to be called. Will be called later.
 	 */
-	MonoVTable *vtable = mono_class_vtable_checked (domain, klass, error);
+	MonoVTable *vtable = mono_class_vtable_checked (klass, error);
 	return_val_if_nok (error, NULL_HANDLE);
 	return mono_object_new_alloc_by_vtable (vtable, error);
 }
@@ -1833,48 +1827,6 @@ void
 ves_icall_System_ComObject_ReleaseInterfaces (MonoComObjectHandle obj, MonoError *error)
 {
 	mono_System_ComObject_ReleaseInterfaces (obj);
-}
-
-static gboolean    
-cominterop_rcw_finalizer (gpointer key, gpointer value, gpointer user_data)
-{
-	MonoGCHandle gchandle = NULL;
-
-	gchandle = (MonoGCHandle)value;
-	if (gchandle) {
-		MonoComInteropProxy* proxy = (MonoComInteropProxy*)mono_gchandle_get_target_internal (gchandle);
-
-		if (proxy) {
-			if (proxy->com_object->itf_hash) {
-				g_hash_table_foreach_remove (proxy->com_object->itf_hash, cominterop_rcw_interface_finalizer, NULL);
-				g_hash_table_destroy (proxy->com_object->itf_hash);
-			}
-			mono_IUnknown_Release (proxy->com_object->iunknown);
-			proxy->com_object->iunknown = NULL;
-			proxy->com_object->itf_hash = NULL;
-		}
-		
-		mono_gchandle_free_internal (gchandle);
-	}
-
-	return TRUE;
-}
-
-void
-mono_cominterop_release_all_rcws (void)
-{
-#ifndef DISABLE_COM
-	if (!rcw_hash)
-		return;
-
-	mono_cominterop_lock ();
-
-	g_hash_table_foreach_remove (rcw_hash, cominterop_rcw_finalizer, NULL);
-	g_hash_table_destroy (rcw_hash);
-	rcw_hash = NULL;
-
-	mono_cominterop_unlock ();
-#endif
 }
 
 gpointer
@@ -3218,21 +3170,21 @@ mono_string_from_bstr_checked (mono_bstr_const bstr, MonoError *error)
 		return NULL_HANDLE_STRING;
 #ifdef HOST_WIN32
 #if HAVE_API_SUPPORT_WIN32_BSTR
-	return mono_string_new_utf16_handle (mono_domain_get (), bstr, SysStringLen ((BSTR)bstr), error);
+	return mono_string_new_utf16_handle (bstr, SysStringLen ((BSTR)bstr), error);
 #else
-	return mono_string_new_utf16_handle (mono_domain_get (), bstr, *((guint32 *)bstr - 1) / sizeof (gunichar2), error);
+	return mono_string_new_utf16_handle (bstr, *((guint32 *)bstr - 1) / sizeof (gunichar2), error);
 #endif /* HAVE_API_SUPPORT_WIN32_BSTR */
 #else
 #ifndef DISABLE_COM
 	if (com_provider == MONO_COM_DEFAULT)
 #endif
-		return mono_string_new_utf16_handle (mono_domain_get (), bstr, *((guint32 *)bstr - 1) / sizeof (gunichar2), error);
+		return mono_string_new_utf16_handle (bstr, *((guint32 *)bstr - 1) / sizeof (gunichar2), error);
 #ifndef DISABLE_COM
 	else if (com_provider == MONO_COM_MS && init_com_provider_ms ()) {
 		glong written = 0;
 		// FIXME mono_string_new_utf32_handle to combine g_ucs4_to_utf16 and mono_string_new_utf16_handle.
 		gunichar2* utf16 = g_ucs4_to_utf16 ((const gunichar *)bstr, sys_string_len_ms (bstr), NULL, &written, NULL);
-		MonoStringHandle res = mono_string_new_utf16_handle (mono_domain_get (), utf16, written, error);
+		MonoStringHandle res = mono_string_new_utf16_handle (utf16, written, error);
 		g_free (utf16);
 		return res;
 	} else {
@@ -4124,16 +4076,6 @@ void mono_marshal_safearray_free_indices (gpointer indices)
 }
 
 #else /* DISABLE_COM */
-
-void
-mono_cominterop_cleanup (void)
-{
-}
-
-void
-mono_cominterop_release_all_rcws (void)
-{
-}
 
 gboolean
 mono_marshal_free_ccw (MonoObject* object)

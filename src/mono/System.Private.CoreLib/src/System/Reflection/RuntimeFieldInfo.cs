@@ -40,7 +40,7 @@ namespace System.Reflection
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    internal class RuntimeFieldInfo : RtFieldInfo
+    internal sealed class RuntimeFieldInfo : RtFieldInfo
     {
 #pragma warning disable 649
         internal IntPtr klass;
@@ -61,14 +61,6 @@ namespace System.Reflection
         internal RuntimeType GetDeclaringTypeInternal()
         {
             return (RuntimeType)DeclaringType!;
-        }
-
-        private RuntimeType ReflectedTypeInternal
-        {
-            get
-            {
-                return (RuntimeType)ReflectedType;
-            }
         }
 
         internal RuntimeModule GetRuntimeModule()

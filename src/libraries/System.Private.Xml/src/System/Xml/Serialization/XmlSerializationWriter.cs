@@ -174,11 +174,13 @@ namespace System.Xml.Serialization
             WriteAttribute("type", XmlSchema.InstanceNamespace, GetQualifiedName(name, ns));
         }
 
+        [RequiresUnreferencedCode("calls GetPrimitiveTypeName")]
         private XmlQualifiedName GetPrimitiveTypeName(Type type)
         {
             return GetPrimitiveTypeName(type, true)!;
         }
 
+        [RequiresUnreferencedCode("calls CreateUnknownTypeException")]
         private XmlQualifiedName? GetPrimitiveTypeName(Type type, bool throwIfUnknown)
         {
             XmlQualifiedName? qname = GetPrimitiveTypeNameInternal(type);
@@ -225,6 +227,11 @@ namespace System.Xml.Serialization
                         typeName = "TimeSpan";
                         typeNs = UrtTypes.Namespace;
                     }
+                    else if (type == typeof(DateTimeOffset))
+                    {
+                        typeName = "dateTimeOffset";
+                        typeNs = UrtTypes.Namespace;
+                    }
                     else if (type == typeof(XmlNode[]))
                     {
                         typeName = Soap.UrType;
@@ -236,6 +243,7 @@ namespace System.Xml.Serialization
             return new XmlQualifiedName(typeName, typeNs);
         }
 
+        [RequiresUnreferencedCode(XmlSerializer.TrimSerializationWarning)]
         protected void WriteTypedPrimitive(string? name, string? ns, object o, bool xsiType)
         {
             string? value = null;
@@ -340,6 +348,12 @@ namespace System.Xml.Serialization
                     {
                         value = XmlConvert.ToString((TimeSpan)o);
                         type = "TimeSpan";
+                        typeNs = UrtTypes.Namespace;
+                    }
+                    else if (t == typeof(DateTimeOffset))
+                    {
+                        value = XmlConvert.ToString((DateTimeOffset)o);
+                        type = "dateTimeOffset";
                         typeNs = UrtTypes.Namespace;
                     }
                     else if (typeof(XmlNode[]).IsAssignableFrom(t))
@@ -770,11 +784,13 @@ namespace System.Xml.Serialization
                 _w.WriteEndElement();
         }
 
+        [RequiresUnreferencedCode(XmlSerializer.TrimSerializationWarning)]
         protected Exception CreateUnknownTypeException(object o)
         {
             return CreateUnknownTypeException(o.GetType());
         }
 
+        [RequiresUnreferencedCode(XmlSerializer.TrimSerializationWarning)]
         protected Exception CreateUnknownTypeException(Type type)
         {
             if (typeof(IXmlSerializable).IsAssignableFrom(type)) return new InvalidOperationException(SR.Format(SR.XmlInvalidSerializable, type.FullName));
@@ -909,20 +925,21 @@ namespace System.Xml.Serialization
         protected void WriteAttribute(string localName, string? ns, string? value)
         {
             if (value == null) return;
-            if (localName == "xmlns" || localName.StartsWith("xmlns:", StringComparison.Ordinal))
-            {
-                ;
-            }
-            else
+
+            if (localName != "xmlns" && !localName.StartsWith("xmlns:", StringComparison.Ordinal))
             {
                 int colon = localName.IndexOf(':');
+
                 if (colon < 0)
                 {
                     if (ns == XmlReservedNs.NsXml)
                     {
                         string? prefix = _w.LookupPrefix(ns);
+
                         if (prefix == null || prefix.Length == 0)
+                        {
                             prefix = "xml";
+                        }
                         _w.WriteAttributeString(prefix, localName, ns, value);
                     }
                     else
@@ -941,20 +958,21 @@ namespace System.Xml.Serialization
         protected void WriteAttribute(string localName, string ns, byte[]? value)
         {
             if (value == null) return;
-            if (localName == "xmlns" || localName.StartsWith("xmlns:", StringComparison.Ordinal))
-            {
-                ;
-            }
-            else
+
+            if (localName != "xmlns" && !localName.StartsWith("xmlns:", StringComparison.Ordinal))
             {
                 int colon = localName.IndexOf(':');
+
                 if (colon < 0)
                 {
                     if (ns == XmlReservedNs.NsXml)
                     {
                         string? prefix = _w.LookupPrefix(ns);
+
                         if (prefix == null || prefix.Length == 0)
+                        {
                             prefix = "xml";
+                        }
                         _w.WriteStartAttribute("xml", localName, ns);
                     }
                     else
@@ -967,6 +985,7 @@ namespace System.Xml.Serialization
                     string? prefix = _w.LookupPrefix(ns);
                     _w.WriteStartAttribute(prefix, localName.Substring(colon + 1), ns);
                 }
+
                 XmlCustomFormatter.WriteArrayBase64(_w, value, 0, value.Length);
                 _w.WriteEndAttribute();
             }
@@ -1145,6 +1164,7 @@ namespace System.Xml.Serialization
             _typeEntries![type] = entry;
         }
 
+        [RequiresUnreferencedCode("calls GetArrayElementType")]
         private void WriteArray(string name, string? ns, object o, Type type)
         {
             Type elementType = TypeScope.GetArrayElementType(type, null)!;
@@ -1232,7 +1252,7 @@ namespace System.Xml.Serialization
                 }
                 else
                 {
-                    _w.WriteAttributeString("arrayType", Soap.Encoding, GetQualifiedName(typeName, typeNs) + "[" + arrayLength.ToString(CultureInfo.InvariantCulture) + "]");
+                    _w.WriteAttributeString("arrayType", Soap.Encoding, $"{GetQualifiedName(typeName, typeNs)}[{arrayLength}]");
                 }
                 for (int i = 0; i < arrayLength; i++)
                 {
@@ -1269,21 +1289,25 @@ namespace System.Xml.Serialization
             }
             _w.WriteEndElement();
         }
+        [RequiresUnreferencedCode(XmlSerializer.TrimSerializationWarning)]
         protected void WritePotentiallyReferencingElement(string? n, string? ns, object? o)
         {
             WritePotentiallyReferencingElement(n, ns, o, null, false, false);
         }
 
+        [RequiresUnreferencedCode(XmlSerializer.TrimSerializationWarning)]
         protected void WritePotentiallyReferencingElement(string? n, string? ns, object? o, Type? ambientType)
         {
             WritePotentiallyReferencingElement(n, ns, o, ambientType, false, false);
         }
 
+        [RequiresUnreferencedCode(XmlSerializer.TrimSerializationWarning)]
         protected void WritePotentiallyReferencingElement(string n, string? ns, object? o, Type? ambientType, bool suppressReference)
         {
             WritePotentiallyReferencingElement(n, ns, o, ambientType, suppressReference, false);
         }
 
+        [RequiresUnreferencedCode(XmlSerializer.TrimSerializationWarning)]
         protected void WritePotentiallyReferencingElement(string? n, string? ns, object? o, Type? ambientType, bool suppressReference, bool isNullable)
         {
             if (o == null)
@@ -1332,12 +1356,13 @@ namespace System.Xml.Serialization
             }
         }
 
-
+        [RequiresUnreferencedCode("calls WriteReferencedElement")]
         private void WriteReferencedElement(object o, Type? ambientType)
         {
             WriteReferencedElement(null, null, o, ambientType);
         }
 
+        [RequiresUnreferencedCode("calls WriteArray")]
         private void WriteReferencedElement(string? name, string? ns, object o, Type? ambientType)
         {
             if (name == null) name = string.Empty;
@@ -1358,6 +1383,7 @@ namespace System.Xml.Serialization
             }
         }
 
+        [RequiresUnreferencedCode("calls InitCallbacks")]
         private TypeEntry? GetTypeEntry(Type t)
         {
             if (_typeEntries == null)
@@ -1368,8 +1394,10 @@ namespace System.Xml.Serialization
             return (TypeEntry?)_typeEntries[t];
         }
 
+        [RequiresUnreferencedCode(XmlSerializer.TrimSerializationWarning)]
         protected abstract void InitCallbacks();
 
+        [RequiresUnreferencedCode(XmlSerializer.TrimSerializationWarning)]
         protected void WriteReferencedElements()
         {
             if (_referencesToWrite == null) return;
@@ -1420,11 +1448,11 @@ namespace System.Xml.Serialization
             {
                 return _aliasBase + (++_tempNamespacePrefix);
             }
-            while (_usedPrefixes.Contains(++_tempNamespacePrefix)) {; }
+            while (_usedPrefixes.Contains(++_tempNamespacePrefix)) { }
             return _aliasBase + _tempNamespacePrefix;
         }
 
-        internal class TypeEntry
+        internal sealed class TypeEntry
         {
             internal XmlSerializationWriteCallback? callback;
             internal string? typeNs;
@@ -1532,7 +1560,7 @@ namespace System.Xml.Serialization
         }
     }
 
-    internal class ReflectionAwareCodeGen
+    internal sealed class ReflectionAwareCodeGen
     {
         private const string arrayMemberKey = "0";
         // reflectionVariables holds mapping between a reflection entity
@@ -1559,6 +1587,7 @@ namespace System.Xml.Serialization
             _writer = writer;
         }
 
+        [RequiresUnreferencedCode("calls GetTypeDesc")]
         internal void WriteReflectionInit(TypeScope scope)
         {
             foreach (Type type in scope.Types)
@@ -1569,6 +1598,7 @@ namespace System.Xml.Serialization
             }
         }
 
+        [RequiresUnreferencedCode(XmlSerializer.TrimSerializationWarning)]
         private string WriteTypeInfo(TypeScope scope, TypeDesc typeDesc, Type type)
         {
             InitTheFirstTime();
@@ -1643,7 +1673,8 @@ namespace System.Xml.Serialization
             }
         }
 
-        private void WriteMappingInfo(TypeMapping mapping, string typeVariable, Type type)
+        private void WriteMappingInfo(TypeMapping mapping, string typeVariable,
+            [DynamicallyAccessedMembers(TrimmerConstants.PublicMembers)] Type type)
         {
             string typeFullName = mapping.TypeDesc!.CSharpName;
             if (mapping is StructMapping)
@@ -1679,7 +1710,8 @@ namespace System.Xml.Serialization
                 }
             }
         }
-        private void WriteCollectionInfo(string typeVariable, TypeDesc typeDesc, Type type)
+        private void WriteCollectionInfo(string typeVariable, TypeDesc typeDesc,
+            [DynamicallyAccessedMembers(TrimmerConstants.PublicMembers)] Type type)
         {
             string typeFullName = CodeIdentifier.GetCSharpName(type);
             string elementTypeFullName = typeDesc.ArrayElementTypeDesc!.CSharpName;
@@ -1720,7 +1752,8 @@ namespace System.Xml.Serialization
             return assemblyVariable;
         }
 
-        private string WriteMemberInfo(Type type, string escapedName, string typeVariable, string memberName)
+        private string WriteMemberInfo(
+            [DynamicallyAccessedMembers(TrimmerConstants.PublicMembers)] Type type, string escapedName, string typeVariable, string memberName)
         {
             MemberInfo[] memberInfos = type.GetMember(memberName);
             for (int i = 0; i < memberInfos.Length; i++)
@@ -1781,7 +1814,8 @@ namespace System.Xml.Serialization
             return methodVariable;
         }
 
-        private string WriteDefaultIndexerInit(Type type, string escapedName, bool collectionUseReflection, bool elementUseReflection)
+        private string WriteDefaultIndexerInit(
+            [DynamicallyAccessedMembers(TrimmerConstants.PublicMembers)] Type type, string escapedName, bool collectionUseReflection, bool elementUseReflection)
         {
             string itemVariable = GenerateVariableName("item", escapedName);
             PropertyInfo defaultIndexer = TypeScope.GetDefaultIndexer(type, null);
@@ -2187,12 +2221,14 @@ namespace System.Xml.Serialization
 ";
     }
 
-    internal class XmlSerializationWriterCodeGen : XmlSerializationCodeGen
+    internal sealed class XmlSerializationWriterCodeGen : XmlSerializationCodeGen
     {
+        [RequiresUnreferencedCode("creates XmlSerializationCodeGen")]
         internal XmlSerializationWriterCodeGen(IndentedWriter writer, TypeScope[] scopes, string access, string className) : base(writer, scopes, access, className)
         {
         }
 
+        [RequiresUnreferencedCode("calls WriteStructMethod")]
         internal void GenerateBegin()
         {
             Writer.Write(Access);
@@ -2232,6 +2268,7 @@ namespace System.Xml.Serialization
             }
         }
 
+        [RequiresUnreferencedCode("calls WriteStructMethod")]
         internal override void GenerateMethod(TypeMapping mapping)
         {
             if (GeneratedMethods.Contains(mapping))
@@ -2247,6 +2284,8 @@ namespace System.Xml.Serialization
                 WriteEnumMethod((EnumMapping)mapping);
             }
         }
+
+        [RequiresUnreferencedCode("calls GenerateReferencedMethods")]
         internal void GenerateEnd()
         {
             GenerateReferencedMethods();
@@ -2255,6 +2294,7 @@ namespace System.Xml.Serialization
             Writer.WriteLine("}");
         }
 
+        [RequiresUnreferencedCode("calls GenerateMembersElement")]
         internal string? GenerateElement(XmlMapping xmlMapping)
         {
             if (!xmlMapping.IsWriteable)
@@ -2303,6 +2343,7 @@ namespace System.Xml.Serialization
             Writer.WriteLine("}");
         }
 
+        [RequiresUnreferencedCode("calls WriteCheckDefault")]
         private void WriteQualifiedNameElement(string name, string? ns, object? defaultValue, string source, bool nullable, bool IsSoap, TypeMapping mapping)
         {
             bool hasDefault = defaultValue != null && defaultValue != DBNull.Value;
@@ -2385,6 +2426,7 @@ namespace System.Xml.Serialization
             }
         }
 
+        [RequiresUnreferencedCode("calls WriteCheckDefault")]
         private void WritePrimitive(string method, string name, string? ns, object? defaultValue, string source, TypeMapping mapping, bool writeXsiType, bool isElement, bool isNullable)
         {
             TypeDesc typeDesc = mapping.TypeDesc!;
@@ -2540,6 +2582,7 @@ namespace System.Xml.Serialization
             WriteTag("WriteEmptyTag", name, ns);
         }
 
+        [RequiresUnreferencedCode("calls WriteMember")]
         private string GenerateMembersElement(XmlMembersMapping xmlMembersMapping)
         {
             ElementAccessor element = xmlMembersMapping.Accessor;
@@ -2573,7 +2616,7 @@ namespace System.Xml.Serialization
                 int xmlnsMember = FindXmlnsIndex(mapping.Members!);
                 if (xmlnsMember >= 0)
                 {
-                    string source = "((" + typeof(System.Xml.Serialization.XmlSerializerNamespaces).FullName + ")p[" + xmlnsMember.ToString(CultureInfo.InvariantCulture) + "])";
+                    string source = $"(({typeof(System.Xml.Serialization.XmlSerializerNamespaces).FullName})p[{xmlnsMember}])";
 
                     Writer.Write("if (pLength > ");
                     Writer.Write(xmlnsMember.ToString(CultureInfo.InvariantCulture));
@@ -2591,7 +2634,7 @@ namespace System.Xml.Serialization
                     if (member.Attribute != null && !member.Ignore)
                     {
                         string index = i.ToString(CultureInfo.InvariantCulture);
-                        string source = "p[" + index + "]";
+                        string source = $"p[{index}]";
 
                         string? specifiedSource = null;
                         int specifiedPosition = 0;
@@ -2602,7 +2645,7 @@ namespace System.Xml.Serialization
                             {
                                 if (mapping.Members[j].Name == memberNameSpecified)
                                 {
-                                    specifiedSource = "((bool) p[" + j.ToString(CultureInfo.InvariantCulture) + "])";
+                                    specifiedSource = $"((bool) p[{j}])";
                                     specifiedPosition = j;
                                     break;
                                 }
@@ -2656,7 +2699,7 @@ namespace System.Xml.Serialization
                     {
                         if (mapping.Members[j].Name == memberNameSpecified)
                         {
-                            specifiedSource = "((bool) p[" + j.ToString(CultureInfo.InvariantCulture) + "])";
+                            specifiedSource = $"((bool) p[{j}])";
                             specifiedPosition = j;
                             break;
                         }
@@ -2688,9 +2731,9 @@ namespace System.Xml.Serialization
                         if (mapping.Members[j].Name == member.ChoiceIdentifier.MemberName)
                         {
                             if (member.ChoiceIdentifier.Mapping!.TypeDesc!.UseReflection)
-                                enumSource = "p[" + j.ToString(CultureInfo.InvariantCulture) + "]";
+                                enumSource = $"p[{j}]";
                             else
-                                enumSource = "((" + mapping.Members[j].TypeDesc!.CSharpName + ")p[" + j.ToString(CultureInfo.InvariantCulture) + "]" + ")";
+                                enumSource = $"(({mapping.Members[j].TypeDesc!.CSharpName })p[{j}])";
                             break;
                         }
                     }
@@ -2749,6 +2792,7 @@ namespace System.Xml.Serialization
             return methodName;
         }
 
+        [RequiresUnreferencedCode("calls WriteMember")]
         private string GenerateTypeElement(XmlTypeMapping xmlTypeMapping)
         {
             ElementAccessor element = xmlTypeMapping.Accessor;
@@ -2943,6 +2987,7 @@ namespace System.Xml.Serialization
             }
         }
 
+        [RequiresUnreferencedCode("calls WriteMember")]
         private void WriteEnumAndArrayTypes()
         {
             foreach (TypeScope scope in Scopes)
@@ -3011,6 +3056,7 @@ namespace System.Xml.Serialization
             }
         }
 
+        [RequiresUnreferencedCode("calls WriteMember")]
         private void WriteStructMethod(StructMapping mapping)
         {
             if (mapping.IsSoap && mapping.TypeDesc!.IsRoot) return;
@@ -3222,6 +3268,7 @@ namespace System.Xml.Serialization
             return (listElementTypeDesc != null && listElementTypeDesc != QnameTypeDesc);
         }
 
+        [RequiresUnreferencedCode("calls WriteAttribute")]
         private void WriteMember(string source, AttributeAccessor attribute, TypeDesc memberTypeDesc, string parent)
         {
             if (memberTypeDesc.IsAbstract) return;
@@ -3393,6 +3440,7 @@ namespace System.Xml.Serialization
             }
         }
 
+        [RequiresUnreferencedCode("calls WritePrimitive")]
         private void WriteAttribute(string source, AttributeAccessor attribute, string parent)
         {
             if (attribute.Mapping is SpecialMapping)
@@ -3417,6 +3465,7 @@ namespace System.Xml.Serialization
             }
         }
 
+        [RequiresUnreferencedCode("calls WriteElements")]
         private void WriteMember(string source, string? choiceSource, ElementAccessor[] elements, TextAccessor? text, ChoiceIdentifierAccessor? choice, TypeDesc memberTypeDesc, bool writeAccessors)
         {
             if (memberTypeDesc.IsArrayLike &&
@@ -3426,7 +3475,7 @@ namespace System.Xml.Serialization
                 WriteElements(source, choiceSource, elements, text, choice, "a", writeAccessors, memberTypeDesc.IsNullable);
         }
 
-
+        [RequiresUnreferencedCode("calls WriteArrayItems")]
         private void WriteArray(string source, string? choiceSource, ElementAccessor[] elements, TextAccessor? text, ChoiceIdentifierAccessor? choice, TypeDesc arrayTypeDesc)
         {
             if (elements.Length == 0 && text == null) return;
@@ -3466,6 +3515,7 @@ namespace System.Xml.Serialization
             Writer.WriteLine("}");
         }
 
+        [RequiresUnreferencedCode("calls WriteElements")]
         private void WriteArrayItems(ElementAccessor[] elements, TextAccessor? text, ChoiceIdentifierAccessor? choice, TypeDesc arrayTypeDesc, string arrayName, string? choiceName)
         {
             TypeDesc arrayElementTypeDesc = arrayTypeDesc.ArrayElementTypeDesc!;
@@ -3567,11 +3617,13 @@ namespace System.Xml.Serialization
             Writer.WriteLine("}");
         }
 
+        [RequiresUnreferencedCode("calls WriteElements")]
         private void WriteElements(string source, ElementAccessor[] elements, TextAccessor? text, ChoiceIdentifierAccessor? choice, string arrayName, bool writeAccessors, bool isNullable)
         {
             WriteElements(source, null, elements, text, choice, arrayName, writeAccessors, isNullable);
         }
 
+        [RequiresUnreferencedCode("calls WriteElement")]
         private void WriteElements(string source, string? enumSource, ElementAccessor[] elements, TextAccessor? text, ChoiceIdentifierAccessor? choice, string arrayName, bool writeAccessors, bool isNullable)
         {
             if (elements.Length == 0 && text == null) return;
@@ -3837,6 +3889,7 @@ namespace System.Xml.Serialization
             }
         }
 
+        [RequiresUnreferencedCode("calls WritePrimitive")]
         private void WriteElement(string source, ElementAccessor element, string arrayName, bool writeAccessor)
         {
             string name = writeAccessor ? element.Name : element.Mapping!.TypeName!;
@@ -4125,6 +4178,7 @@ namespace System.Xml.Serialization
             Writer.WriteLine(");");
         }
 
+        [RequiresUnreferencedCode("calls GetType")]
         private void WriteCheckDefault(TypeMapping mapping, string source, object value, bool isNullable)
         {
             Writer.Write("if (");
@@ -4278,6 +4332,18 @@ namespace System.Xml.Serialization
                     Writer.Write(((DateTime)value).Ticks.ToString(CultureInfo.InvariantCulture));
                     Writer.Write(")");
                 }
+                else if (type == typeof(DateTimeOffset))
+                {
+                    Writer.Write(" new ");
+                    Writer.Write(type.FullName);
+                    Writer.Write("(");
+                    Writer.Write(((DateTimeOffset)value).Ticks.ToString(CultureInfo.InvariantCulture));
+                    Writer.Write(", new ");
+                    Writer.Write(((DateTimeOffset)value).Offset.GetType().FullName);
+                    Writer.Write("(");
+                    Writer.Write(((DateTimeOffset)value).Offset.Ticks.ToString(CultureInfo.InvariantCulture));
+                    Writer.Write("))");
+                }
                 else if (type == typeof(TimeSpan))
                 {
                     Writer.Write(" new ");
@@ -4384,12 +4450,12 @@ namespace System.Xml.Serialization
                     continue;
                 }
                 int colon = xmlName.LastIndexOf(':');
-                string? choiceNs = colon < 0 ? choiceMapping.Namespace : xmlName.Substring(0, colon);
-                string choiceName = colon < 0 ? xmlName : xmlName.Substring(colon + 1);
+                ReadOnlySpan<char> choiceNs = colon < 0 ? choiceMapping.Namespace : xmlName.AsSpan(0, colon);
+                ReadOnlySpan<char> choiceName = colon < 0 ? xmlName : xmlName.AsSpan(colon + 1);
 
-                if (element.Name == choiceName)
+                if (choiceName.SequenceEqual(element.Name))
                 {
-                    if ((element.Form == XmlSchemaForm.Unqualified && string.IsNullOrEmpty(choiceNs)) || element.Namespace == choiceNs)
+                    if ((element.Form == XmlSchemaForm.Unqualified && choiceNs.IsEmpty) || choiceNs.SequenceEqual(element.Namespace))
                     {
                         if (useReflection)
                             enumValue = choiceMapping.Constants[i].Value.ToString(CultureInfo.InvariantCulture);

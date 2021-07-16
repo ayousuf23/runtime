@@ -10,16 +10,13 @@
 
     <!-- We're currently not building a "live" baseline, instead we're using .NETCore 1.0 RTM stable versions as the baseline -->
     <SkipBaseLineCheck>true</SkipBaseLineCheck>
-    <PackageVersion Condition="'$(PackageVersion)' == ''">6.0.0</PackageVersion>
+    <PackageVersion Condition="'$(PackageVersion)' == '' and '$(MSBuildProjectExtension)' == '.pkgproj'">6.0.0</PackageVersion>
     <SkipValidatePackageTargetFramework>true</SkipValidatePackageTargetFramework>
     <SkipGenerationCheck>true</SkipGenerationCheck>
+    <DefaultAllowedOutputExtensionsInPackageBuildOutputFolder>.dll;.exe;.winmd;.json;.pri;</DefaultAllowedOutputExtensionsInPackageBuildOutputFolder>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(DotNetBuildFromSource)' == 'true'">
-    <!-- Don't build referenced projects -->
-    <BuildPackageLibraryReferences>false</BuildPackageLibraryReferences>
-    <!-- Omit any files that were not built -->
-    <AllowPartialPackages>true</AllowPartialPackages>
     <!-- Don't permit harvesting since this requires pre-builts -->
     <HarvestStablePackage>false</HarvestStablePackage>
     <!-- Validation will fail in case we were relying on harvested assets or assets not built to satisfy stated support -->
@@ -27,14 +24,11 @@
   </PropertyGroup>
 
   <PropertyGroup>
+    <NuSpecOutputPath Condition="'$(NuSpecOutputPath)' == ''">$([MSBuild]::NormalizeDirectory('$(ArtifactsPackagesDir)', 'specs'))</NuSpecOutputPath>
     <PkgProjPath>$(MSBuildProjectDirectory)\..\pkg\$(MSBuildProjectName).pkgproj</PkgProjPath>
   </PropertyGroup>
 
   <Import Condition="Exists('$(PkgDir)baseline\baseline.props') and '$(MSBuildProjectExtension)' == '.pkgproj'" Project="$(PkgDir)baseline\baseline.props" />
-
-  <PropertyGroup Condition="'$(IsPackable)' == 'true'">
-    <PackageDesignerMarkerFile>$(MSBuildThisFileDirectory)useSharedDesignerContext.txt</PackageDesignerMarkerFile>
-  </PropertyGroup>
 
   <ItemGroup Condition="'$(IsPackable)' == 'true'">
     <!-- Add a marker to help the designer optimize & share .NET Core packages -->
@@ -45,5 +39,17 @@
 
     <!-- Make sure that NETStandard.Library package never gets added as a dependency for .NET 4.6.1 -->
     <SuppressMetaPackage Include="NETStandard.Library" TargetFramework="net461" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- add 3.1 to validation, using 3.0 RIDs -->
+    <DefaultValidateFramework Include="netcoreapp3.1">
+      <RuntimeIDs>@(NETCoreApp30RIDs)</RuntimeIDs>
+    </DefaultValidateFramework>
+  </ItemGroup>
+
+  <!-- TODO: Remove when all required nuget pack features are part of the consumed SDK. -->
+  <ItemGroup Condition="'$(IsPackable)' == 'true' and '$(IsSourceProject)' == 'true'">
+    <PackageReference Include="NuGet.Build.Tasks.Pack" Version="$(NuGetBuildTasksPackVersion)" PrivateAssets="all" IsImplicitlyDefined="true" />
   </ItemGroup>
 </Project>

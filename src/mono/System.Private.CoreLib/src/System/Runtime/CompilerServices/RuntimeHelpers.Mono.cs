@@ -3,6 +3,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.Serialization;
 using Internal.Runtime.CompilerServices;
+using System.Diagnostics.Tracing;
 
 namespace System.Runtime.CompilerServices
 {
@@ -152,6 +153,7 @@ namespace System.Runtime.CompilerServices
 
             return GetUninitializedObjectInternal(new RuntimeTypeHandle(rt).Value);
         }
+
 
         [MethodImplAttribute(MethodImplOptions.InternalCall)]
         private static extern unsafe void PrepareMethod(IntPtr method, IntPtr* instantiations, int ninst);

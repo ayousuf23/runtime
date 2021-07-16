@@ -23,7 +23,7 @@ using Internal.TypeSystem.Ecma;
 
 namespace ILCompiler
 {
-    public abstract class Compilation : ICompilation
+    public abstract class Compilation : ICompilation, IDisposable
     {
         protected readonly DependencyAnalyzerBase<NodeFactory> _dependencyGraph;
         protected readonly NodeFactory _nodeFactory;
@@ -67,6 +67,7 @@ namespace ILCompiler
             _methodILCache = new ILCache(ilProvider, NodeFactory.CompilationModuleGroup);
         }
 
+        public abstract void Dispose();
         public abstract void Compile(string outputFileName);
         public abstract void WriteDependencyLog(string outputFileName);
 
@@ -122,9 +123,9 @@ namespace ILCompiler
             return _devirtualizationManager.IsEffectivelySealed(method);
         }
 
-        public MethodDesc ResolveVirtualMethod(MethodDesc declMethod, TypeDesc implType)
+        public MethodDesc ResolveVirtualMethod(MethodDesc declMethod, TypeDesc implType, out CORINFO_DEVIRTUALIZATION_DETAIL devirtualizationDetail)
         {
-            return _devirtualizationManager.ResolveVirtualMethod(declMethod, implType);
+            return _devirtualizationManager.ResolveVirtualMethod(declMethod, implType, out devirtualizationDetail);
         }
 
         public bool IsModuleInstrumented(ModuleDesc module)
@@ -185,20 +186,30 @@ namespace ILCompiler
         {
             private readonly NodeFactory _factory;
             private readonly RootAdder _rootAdder;
+            private readonly DeferredTillPhaseNode _deferredPhaseNode = new DeferredTillPhaseNode(1);
 
             public RootingServiceProvider(NodeFactory factory, RootAdder rootAdder)
             {
                 _factory = factory;
                 _rootAdder = rootAdder;
+                _rootAdder(_deferredPhaseNode, "Deferred nodes");
             }
 
-            public void AddCompilationRoot(MethodDesc method, string reason)
+            public void AddCompilationRoot(MethodDesc method, bool rootMinimalDependencies, string reason)
             {
                 MethodDesc canonMethod = method.GetCanonMethodTarget(CanonicalFormKind.Specific);
                 if (_factory.CompilationModuleGroup.ContainsMethodBody(canonMethod, false))
                 {
                     IMethodNode methodEntryPoint = _factory.CompiledMethodNode(canonMethod);
-                    _rootAdder(methodEntryPoint, reason);
+
+                    if (rootMinimalDependencies)
+                    {
+                        _deferredPhaseNode.AddDependency((DependencyNodeCore<NodeFactory>)methodEntryPoint);
+                    }
+                    else
+                    {
+                        _rootAdder(methodEntryPoint, reason);
+                    }
                 }
             }
         }
@@ -208,6 +219,7 @@ namespace ILCompiler
     {
         void Compile(string outputFileName);
         void WriteDependencyLog(string outputFileName);
+        void Dispose();
     }
 
     public sealed class ReadyToRunCodegenCompilation : Compilation
@@ -235,6 +247,7 @@ namespace ILCompiler
         private readonly string _pdbPath;
         private readonly bool _generatePerfMapFile;
         private readonly string _perfMapPath;
+        private readonly int _perfMapFormatVersion;
         private readonly bool _generateProfileFile;
         private readonly Func<MethodDesc, string> _printReproInstructions;
 
@@ -270,6 +283,7 @@ namespace ILCompiler
             string pdbPath,
             bool generatePerfMapFile,
             string perfMapPath,
+            int perfMapFormatVersion,
             bool generateProfileFile,
             int parallelism,
             ProfileDataManager profileData,
@@ -295,6 +309,7 @@ namespace ILCompiler
             _pdbPath = pdbPath;
             _generatePerfMapFile = generatePerfMapFile;
             _perfMapPath = perfMapPath;
+            _perfMapFormatVersion = perfMapFormatVersion;
             _generateProfileFile = generateProfileFile;
             _customPESectionAlignment = customPESectionAlignment;
             SymbolNodeFactory = new ReadyToRunSymbolNodeFactory(nodeFactory, verifyTypeAndFieldLayout);
@@ -332,6 +347,7 @@ namespace ILCompiler
                 ReadyToRunObjectWriter.EmitObject(
                     outputFile,
                     componentModule: null,
+                    inputFiles: _inputFiles,
                     nodes,
                     NodeFactory,
                     generateMapFile: _generateMapFile,
@@ -340,6 +356,7 @@ namespace ILCompiler
                     pdbPath: _pdbPath,
                     generatePerfMapFile: _generatePerfMapFile,
                     perfMapPath: _perfMapPath,
+                    perfMapFormatVersion: _perfMapFormatVersion,
                     generateProfileFile: _generateProfileFile,
                     callChainProfile: _profileData.CallChainProfile,
                     _customPESectionAlignment);
@@ -411,15 +428,17 @@ namespace ILCompiler
             ReadyToRunObjectWriter.EmitObject(
                 outputFile,
                 componentModule: inputModule,
+                inputFiles: new string[] { inputFile },
                 componentGraph.MarkedNodeList,
                 componentFactory,
                 generateMapFile: false,
                 generateMapCsvFile: false,
                 generatePdbFile: false,
-                pdbPath: _pdbPath,
+                pdbPath: null,
                 generatePerfMapFile: false,
-                perfMapPath: _perfMapPath,
-                generateProfileFile: _generateProfileFile,
+                perfMapPath: null,
+                perfMapFormatVersion: _perfMapFormatVersion,
+                generateProfileFile: false,
                 _profileData.CallChainProfile,
                 customPESectionAlignment: 0);
         }
@@ -524,6 +543,13 @@ namespace ILCompiler
             return TypeSystemContext.SystemModule.GetKnownType("System", "RuntimeType");
         }
 
+        // Compilation is broken into phases which interact with dependency analysis
+        // Phase 0: All compilations which are driven by our standard heuristics and dependency expansion model
+        // Phase 1: A helper phase which works in tandem with the DeferredTillPhaseNode to gather work to be done in phase 2
+        // Phase 2: A phase where all compilations are not allowed to add dependencies that can trigger further compilations.
+        // The _finishedFirstCompilationRunInPhase2 variable works in concert some checking to ensure that we don't violate any of this model
+        private bool _finishedFirstCompilationRunInPhase2 = false;
+
         protected override void ComputeDependencyNodeDependencies(List<DependencyNodeCore<NodeFactory>> obj)
         {
             using (PerfEventSource.StartStopEvents.JitEvents())
@@ -531,6 +557,19 @@ namespace ILCompiler
                 Action<DependencyNodeCore<NodeFactory>> compileOneMethod = (DependencyNodeCore<NodeFactory> dependency) =>
                 {
                     MethodWithGCInfo methodCodeNodeNeedingCode = dependency as MethodWithGCInfo;
+                    if (methodCodeNodeNeedingCode == null)
+                    {
+                        if (dependency is DeferredTillPhaseNode deferredPhaseNode)
+                        {
+                            if (Logger.IsVerbose)
+                                _logger.Writer.WriteLine($"Moved to phase {_nodeFactory.CompilationCurrentPhase}");
+                            deferredPhaseNode.NotifyCurrentPhase(_nodeFactory.CompilationCurrentPhase);
+                            return;
+                        }
+                    }
+
+                    Debug.Assert((_nodeFactory.CompilationCurrentPhase == 0) || ((_nodeFactory.CompilationCurrentPhase == 2) && !_finishedFirstCompilationRunInPhase2));
+
                     MethodDesc method = methodCodeNodeNeedingCode.Method;
 
                     if (Logger.IsVerbose)
@@ -551,7 +590,7 @@ namespace ILCompiler
                             // Create only 1 CorInfoImpl per thread.
                             // This allows SuperPMI to rely on non-reuse of handles in ObjectToHandle
                             CorInfoImpl corInfoImpl = _corInfoImpls.GetValue(Thread.CurrentThread, thread => new CorInfoImpl(this));
-                            corInfoImpl.CompileMethod(methodCodeNodeNeedingCode);
+                            corInfoImpl.CompileMethod(methodCodeNodeNeedingCode, Logger);
                         }
                     }
                     catch (TypeSystemException ex)
@@ -573,6 +612,8 @@ namespace ILCompiler
                 };
 
                 // Use only main thread to compile if parallelism is 1. This allows SuperPMI to rely on non-reuse of handles in ObjectToHandle
+                if (Logger.IsVerbose)
+                    Logger.Writer.WriteLine($"Processing {obj.Count} dependencies");
                 if (_parallelism == 1)
                 {
                     foreach (var dependency in obj)
@@ -593,8 +634,18 @@ namespace ILCompiler
             {
                 _methodILCache = new ILCache(_methodILCache.ILProvider, NodeFactory.CompilationModuleGroup);
             }
+
+            if (_nodeFactory.CompilationCurrentPhase == 2)
+            {
+                _finishedFirstCompilationRunInPhase2 = true;
+            }
         }
 
         public ISymbolNode GetFieldRvaData(FieldDesc field) => NodeFactory.CopiedFieldRva(field);
+
+        public override void Dispose()
+        {
+            _corInfoImpls?.Clear();
+        }
     }
 }

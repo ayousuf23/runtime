@@ -2,16 +2,16 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using Microsoft.Win32.SafeHandles;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Runtime.Serialization;
+using System.Runtime.Versioning;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Runtime.Versioning;
-using System.Collections.Generic;
 
 namespace System.Diagnostics
 {
@@ -260,6 +260,9 @@ namespace System.Diagnostics
         /// <remarks>On macOS and FreeBSD, setting the value works only for the current process.</remarks>
         public IntPtr MaxWorkingSet
         {
+            [UnsupportedOSPlatform("ios")]
+            [UnsupportedOSPlatform("maccatalyst")]
+            [UnsupportedOSPlatform("tvos")]
             get
             {
                 EnsureWorkingSetLimits();
@@ -280,6 +283,9 @@ namespace System.Diagnostics
         /// <remarks>On macOS and FreeBSD, setting the value works only for the current process.</remarks>
         public IntPtr MinWorkingSet
         {
+            [UnsupportedOSPlatform("ios")]
+            [UnsupportedOSPlatform("maccatalyst")]
+            [UnsupportedOSPlatform("tvos")]
             get
             {
                 EnsureWorkingSetLimits();
@@ -683,6 +689,7 @@ namespace System.Diagnostics
         {
             get
             {
+                CheckDisposed();
                 if (_standardInput == null)
                 {
                     throw new InvalidOperationException(SR.CantGetStandardIn);
@@ -700,6 +707,7 @@ namespace System.Diagnostics
         {
             get
             {
+                CheckDisposed();
                 if (_standardOutput == null)
                 {
                     throw new InvalidOperationException(SR.CantGetStandardOut);
@@ -725,6 +733,7 @@ namespace System.Diagnostics
         {
             get
             {
+                CheckDisposed();
                 if (_standardError == null)
                 {
                     throw new InvalidOperationException(SR.CantGetStandardError);
@@ -1150,10 +1159,7 @@ namespace System.Diagnostics
             if (!_haveProcessHandle)
             {
                 //Cannot open a new process handle if the object has been disposed, since finalization has been suppressed.
-                if (_disposed)
-                {
-                    throw new ObjectDisposedException(GetType().Name);
-                }
+                CheckDisposed();
 
                 SetProcessHandle(GetProcessHandle());
             }
@@ -1197,6 +1203,9 @@ namespace System.Diagnostics
         ///       component.
         ///    </para>
         /// </devdoc>
+        [UnsupportedOSPlatform("ios")]
+        [UnsupportedOSPlatform("maccatalyst")]
+        [UnsupportedOSPlatform("tvos")]
         public bool Start()
         {
             Close();
@@ -1224,10 +1233,7 @@ namespace System.Diagnostics
             }
 
             //Cannot start a new process and store its handle if the object has been disposed, since finalization has been suppressed.
-            if (_disposed)
-            {
-                throw new ObjectDisposedException(GetType().Name);
-            }
+            CheckDisposed();
 
             SerializationGuard.ThrowIfDeserializationInProgress("AllowProcessCreation", ref s_cachedSerializationSwitch);
 
@@ -1241,11 +1247,14 @@ namespace System.Diagnostics
         ///       component.
         ///    </para>
         /// </devdoc>
+        [UnsupportedOSPlatform("ios")]
+        [UnsupportedOSPlatform("maccatalyst")]
+        [UnsupportedOSPlatform("tvos")]
         public static Process Start(string fileName)
         {
             // the underlying Start method can only return null on Windows platforms,
             // when the ProcessStartInfo.UseShellExecute property is set to true.
-            // We can thus safely assert non-nullability for tihs overload.
+            // We can thus safely assert non-nullability for this overload.
             return Start(new ProcessStartInfo(fileName))!;
         }
 
@@ -1257,17 +1266,23 @@ namespace System.Diagnostics
         ///       component.
         ///    </para>
         /// </devdoc>
+        [UnsupportedOSPlatform("ios")]
+        [UnsupportedOSPlatform("maccatalyst")]
+        [UnsupportedOSPlatform("tvos")]
         public static Process Start(string fileName, string arguments)
         {
             // the underlying Start method can only return null on Windows platforms,
             // when the ProcessStartInfo.UseShellExecute property is set to true.
-            // We can thus safely assert non-nullability for tihs overload.
+            // We can thus safely assert non-nullability for this overload.
             return Start(new ProcessStartInfo(fileName, arguments))!;
         }
 
         /// <summary>
         /// Starts a process resource by specifying the name of an application and a set of command line arguments
         /// </summary>
+        [UnsupportedOSPlatform("ios")]
+        [UnsupportedOSPlatform("maccatalyst")]
+        [UnsupportedOSPlatform("tvos")]
         public static Process Start(string fileName, IEnumerable<string> arguments)
         {
             if (fileName == null)
@@ -1292,6 +1307,9 @@ namespace System.Diagnostics
         ///       component.
         ///    </para>
         /// </devdoc>
+        [UnsupportedOSPlatform("ios")]
+        [UnsupportedOSPlatform("maccatalyst")]
+        [UnsupportedOSPlatform("tvos")]
         public static Process? Start(ProcessStartInfo startInfo)
         {
             Process process = new Process();
@@ -1348,7 +1366,7 @@ namespace System.Diagnostics
                 string processName = ProcessName;
                 if (processName.Length != 0)
                 {
-                    return string.Format(CultureInfo.CurrentCulture, "{0} ({1})", base.ToString(), processName);
+                    return $"{base.ToString()} ({processName})";
                 }
             }
             return base.ToString();
@@ -1452,7 +1470,7 @@ namespace System.Diagnostics
                 // exception up to the user
                 if (HasExited)
                 {
-                    await WaitUntilOutputEOF().ConfigureAwait(false);
+                    await WaitUntilOutputEOF(cancellationToken).ConfigureAwait(false);
                     return;
                 }
 
@@ -1480,23 +1498,23 @@ namespace System.Diagnostics
                 }
 
                 // Wait until output streams have been drained
-                await WaitUntilOutputEOF().ConfigureAwait(false);
+                await WaitUntilOutputEOF(cancellationToken).ConfigureAwait(false);
             }
             finally
             {
                 Exited -= handler;
             }
 
-            async ValueTask WaitUntilOutputEOF()
+            async Task WaitUntilOutputEOF(CancellationToken cancellationToken)
             {
-                if (_output != null)
+                if (_output is not null)
                 {
-                    await _output.WaitUntilEOFAsync(cancellationToken).ConfigureAwait(false);
+                    await _output.EOF.WaitAsync(cancellationToken).ConfigureAwait(false);
                 }
 
-                if (_error != null)
+                if (_error is not null)
                 {
-                    await _error.WaitUntilEOFAsync(cancellationToken).ConfigureAwait(false);
+                    await _error.EOF.WaitAsync(cancellationToken).ConfigureAwait(false);
                 }
             }
         }
@@ -1586,6 +1604,7 @@ namespace System.Diagnostics
         /// </devdoc>
         public void CancelOutputRead()
         {
+            CheckDisposed();
             if (_output != null)
             {
                 _output.CancelOperation();
@@ -1606,6 +1625,7 @@ namespace System.Diagnostics
         /// </devdoc>
         public void CancelErrorRead()
         {
+            CheckDisposed();
             if (_error != null)
             {
                 _error.CancelOperation();
@@ -1654,6 +1674,23 @@ namespace System.Diagnostics
                     errorDataReceived(this, e);
                 }
             }
+        }
+
+        /// <summary>Throws a System.ObjectDisposedException if the Proces was disposed</summary>
+        /// <exception cref="System.ObjectDisposedException">If the Proces has been disposed.</exception>
+        private void CheckDisposed()
+        {
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(GetType().Name);
+            }
+        }
+
+        private static Win32Exception CreateExceptionForErrorStartingProcess(string errorMessage, int errorCode, string fileName, string? workingDirectory)
+        {
+            string directoryForException = string.IsNullOrEmpty(workingDirectory) ? Directory.GetCurrentDirectory() : workingDirectory;
+            string msg = SR.Format(SR.ErrorStartingProcess, fileName, directoryForException, errorMessage);
+            return new Win32Exception(errorCode, msg);
         }
 
         /// <summary>

@@ -7,6 +7,7 @@ using System.Collections.Specialized;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
 using System.ComponentModel;
@@ -29,6 +30,7 @@ namespace System.Diagnostics.Tests
             => PlatformDetection.IsWindowsAndElevated && PlatformDetection.IsNotWindowsNanoServer && RemoteExecutor.IsSupported;
 
         [Fact]
+        [ActiveIssue("https://github.com/dotnet/runtime/issues/51386", TestPlatforms.iOS | TestPlatforms.tvOS | TestPlatforms.MacCatalyst)]
         public void TestEnvironmentProperty()
         {
             Assert.NotEqual(0, new Process().StartInfo.Environment.Count);
@@ -39,7 +41,6 @@ namespace System.Diagnostics.Tests
             // with current environmental variables.
 
             IDictionary<string, string> environment = psi.Environment;
-
             Assert.NotEqual(0, environment.Count);
 
             int countItems = environment.Count;
@@ -456,8 +457,8 @@ namespace System.Diagnostics.Tests
         [OuterLoop("Requires admin privileges")]
         public void TestUserCredentialsPropertiesOnWindows()
         {
-            // [SuppressMessage("Microsoft.Security", "CS002:SecretInNextLine", Justification="Unit test dummy credentials.")]
-            const string username = "testForDotnetRuntime", password = "PassWord123!!";
+            const string username = "testForDotnetRuntime";
+            string password = Convert.ToBase64String(RandomNumberGenerator.GetBytes(33)) + "_-As@!%*(1)4#2";
 
             uint removalResult = Interop.NetUserDel(null, username);
             Assert.True(removalResult == Interop.ExitCodes.NERR_Success || removalResult == Interop.ExitCodes.NERR_UserNotFound);
@@ -771,6 +772,7 @@ namespace System.Diagnostics.Tests
 
         [PlatformSpecific(TestPlatforms.AnyUnix)]  // Test case is specific to Unix
         [Fact]
+        [ActiveIssue("https://github.com/dotnet/runtime/issues/51386", TestPlatforms.iOS | TestPlatforms.tvOS | TestPlatforms.MacCatalyst)]
         public void TestEnvironmentVariablesPropertyUnix()
         {
             ProcessStartInfo psi = new ProcessStartInfo();
@@ -1155,12 +1157,11 @@ namespace System.Diagnostics.Tests
             sb.AppendLine("------------------------------");
 
             string open = GetAssociationString(0, 1 /* ASSOCSTR_COMMAND */, ".txt", "open");
-            sb.AppendFormat("Open command: {0}", open);
-            sb.AppendLine();
+            sb.AppendLine($"Open command: {open}");
 
             string progId = GetAssociationString(0, 20 /* ASSOCSTR_PROGID */, ".txt", null);
-            sb.AppendFormat("ProgID: {0}", progId);
-            sb.AppendLine();
+            sb.AppendLine($"ProgID: {progId}");
+
             return sb.ToString();
         }
 

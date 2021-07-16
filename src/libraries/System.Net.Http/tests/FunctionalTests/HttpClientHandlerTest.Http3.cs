@@ -78,7 +78,202 @@ namespace System.Net.Http.Functional.Tests
             await new[] { clientTask, serverTask }.WhenAllOrAnyFailed(20_000);
         }
 
+        [Theory]
+        [InlineData(10)]
+        [InlineData(100)]
+        [InlineData(1000)]
+        public async Task SendMoreThanStreamLimitRequests_Succeeds(int streamLimit)
+        {
+            using Http3LoopbackServer server = CreateHttp3LoopbackServer(new Http3Options(){ MaxBidirectionalStreams = streamLimit });
+
+            Task serverTask = Task.Run(async () =>
+            {
+                using Http3LoopbackConnection connection = (Http3LoopbackConnection)await server.EstablishGenericConnectionAsync();
+                for (int i = 0; i < streamLimit + 1; ++i)
+                {
+                    using Http3LoopbackStream stream = await connection.AcceptRequestStreamAsync();
+                    await stream.HandleRequestAsync();
+                }
+            });
+
+            Task clientTask = Task.Run(async () =>
+            {
+                using HttpClient client = CreateHttpClient();
+
+                for (int i = 0; i < streamLimit + 1; ++i)
+                {
+                    HttpRequestMessage request = new()
+                    {
+                        Method = HttpMethod.Get,
+                        RequestUri = server.Address,
+                        Version = HttpVersion30,
+                        VersionPolicy = HttpVersionPolicy.RequestVersionExact
+                    };
+                    using var response = await client.SendAsync(request).WaitAsync(TimeSpan.FromSeconds(10));
+                }
+            });
+
+            await new[] { clientTask, serverTask }.WhenAllOrAnyFailed(20_000);
+        }
+
+        [Theory]
+        [InlineData(10)]
+        [InlineData(100)]
+        [InlineData(1000)]
+        public async Task SendStreamLimitRequestsConcurrently_Succeeds(int streamLimit)
+        {
+            using Http3LoopbackServer server = CreateHttp3LoopbackServer(new Http3Options(){ MaxBidirectionalStreams = streamLimit });
+
+            Task serverTask = Task.Run(async () =>
+            {
+                using Http3LoopbackConnection connection = (Http3LoopbackConnection)await server.EstablishGenericConnectionAsync();
+                for (int i = 0; i < streamLimit; ++i)
+                {
+                    using Http3LoopbackStream stream = await connection.AcceptRequestStreamAsync();
+                    await stream.HandleRequestAsync();
+                }
+            });
+
+            Task clientTask = Task.Run(async () =>
+            {
+                using HttpClient client = CreateHttpClient();
+
+                var tasks = new Task<HttpResponseMessage>[streamLimit];
+                Parallel.For(0, streamLimit, i =>
+                {
+                    HttpRequestMessage request = new()
+                    {
+                        Method = HttpMethod.Get,
+                        RequestUri = server.Address,
+                        Version = HttpVersion30,
+                        VersionPolicy = HttpVersionPolicy.RequestVersionExact
+                    };
+
+                    tasks[i] = client.SendAsync(request);
+                });
+
+                var responses = await Task.WhenAll(tasks);
+                foreach (var response in responses)
+                {
+                    response.Dispose();
+                }
+            });
+
+            await new[] { clientTask, serverTask }.WhenAllOrAnyFailed(20_000);
+        }
+
+        [Theory]
+        [InlineData(10)]
+        [InlineData(100)]
+        [InlineData(1000)]
+        public async Task SendMoreThanStreamLimitRequestsConcurrently_LastWaits(int streamLimit)
+        {
+            // This combination leads to a hang manifesting in CI only. Disabling it until there's more time to investigate.
+            // [ActiveIssue("https://github.com/dotnet/runtime/issues/53688")]
+            if (this.UseQuicImplementationProvider == QuicImplementationProviders.Mock)
+            {
+                return;
+            }
+
+            using Http3LoopbackServer server = CreateHttp3LoopbackServer(new Http3Options(){ MaxBidirectionalStreams = streamLimit });
+            var lastRequestContentStarted = new TaskCompletionSource();
+
+            Task serverTask = Task.Run(async () =>
+            {
+                // Read the first streamLimit requests, keep the streams open to make the last one wait.
+                using Http3LoopbackConnection connection = (Http3LoopbackConnection)await server.EstablishGenericConnectionAsync();
+                var streams = new Http3LoopbackStream[streamLimit];
+                for (int i = 0; i < streamLimit; ++i)
+                {
+                    Http3LoopbackStream stream = await connection.AcceptRequestStreamAsync();
+                    var body = await stream.ReadRequestDataAsync();
+                    streams[i] = stream;
+                }
+
+                // Make the last request running independently.
+                var lastRequest = Task.Run(async () => {
+                    using Http3LoopbackStream stream = await connection.AcceptRequestStreamAsync();
+                    await stream.HandleRequestAsync();
+                });
+
+                // All the initial streamLimit streams are still opened so the last request cannot started yet.
+                Assert.False(lastRequestContentStarted.Task.IsCompleted);
+
+                // Reply to the first streamLimit requests.
+                for (int i = 0; i < streamLimit; ++i)
+                {
+                    await streams[i].SendResponseAsync();
+                    streams[i].Dispose();
+                    // After the first request is fully processed, the last request should unblock and get processed.
+                    if (i == 0)
+                    {
+                        await lastRequestContentStarted.Task;
+                    }
+                }
+                await lastRequest;
+            });
+
+            Task clientTask = Task.Run(async () =>
+            {
+                using HttpClient client = CreateHttpClient();
+
+                // Fire out the first streamLimit requests in parallel, no waiting for the responses yet.
+                var countdown = new CountdownEvent(streamLimit);
+                var tasks = new Task<HttpResponseMessage>[streamLimit];
+                Parallel.For(0, streamLimit, i =>
+                {
+                    HttpRequestMessage request = new()
+                    {
+                        Method = HttpMethod.Post,
+                        RequestUri = server.Address,
+                        Version = HttpVersion30,
+                        VersionPolicy = HttpVersionPolicy.RequestVersionExact,
+                        Content = new StreamContent(new DelegateStream(
+                            canReadFunc: () => true,
+                            readFunc: (buffer, offset, count) =>
+                            {
+                                countdown.Signal();
+                                return 0;
+                            }))
+                    };
+
+                    tasks[i] = client.SendAsync(request);
+                });
+
+                // Wait for the first streamLimit request to get started.
+                countdown.Wait();
+
+                // Fire out the last request, that should wait until the server fully handles at least one request.
+                HttpRequestMessage last = new()
+                {
+                    Method = HttpMethod.Post,
+                    RequestUri = server.Address,
+                    Version = HttpVersion30,
+                    VersionPolicy = HttpVersionPolicy.RequestVersionExact,
+                    Content = new StreamContent(new DelegateStream(
+                        canReadFunc: () => true,
+                        readFunc: (buffer, offset, count) =>
+                        {
+                            lastRequestContentStarted.SetResult();
+                            return 0;
+                        }))
+                };
+                var lastTask = client.SendAsync(last);
+
+                // Wait for all requests to finish. Whether the last request was pending is checked on the server side.
+                var responses = await Task.WhenAll(tasks);
+                foreach (var response in responses)
+                {
+                    response.Dispose();
+                }
+                await lastTask;
+            });
+
+            await new[] { clientTask, serverTask }.WhenAllOrAnyFailed(20_000);
+        }
+
         [Fact]
+        [ActiveIssue("https://github.com/dotnet/runtime/issues/53090")]
         public async Task ReservedFrameType_Throws()
         {
             const int ReservedHttp2PriorityFrameId = 0x2;
@@ -119,11 +314,75 @@ namespace System.Net.Http.Functional.Tests
             await new[] { clientTask, serverTask }.WhenAllOrAnyFailed(20_000);
         }
 
+        [Fact]
+        public async Task ServerCertificateCustomValidationCallback_Succeeds()
+        {
+            // Mock doesn't make use of cart validation callback.
+            if (UseQuicImplementationProvider == QuicImplementationProviders.Mock)
+            {
+                return;
+            }
+
+            HttpRequestMessage? callbackRequest = null;
+            int invocationCount = 0;
+
+            var httpClientHandler = CreateHttpClientHandler();
+            httpClientHandler.ServerCertificateCustomValidationCallback = (request, _, _, _) =>
+            {
+                callbackRequest = request;
+                ++invocationCount;
+                return true;
+            };
+
+            using Http3LoopbackServer server = CreateHttp3LoopbackServer();
+            using HttpClient client = CreateHttpClient(httpClientHandler);
+
+            Task serverTask = Task.Run(async () =>
+            {
+                using Http3LoopbackConnection connection = (Http3LoopbackConnection)await server.EstablishGenericConnectionAsync();
+                using Http3LoopbackStream stream = await connection.AcceptRequestStreamAsync();
+                await stream.HandleRequestAsync();
+                using Http3LoopbackStream stream2 = await connection.AcceptRequestStreamAsync();
+                await stream2.HandleRequestAsync();
+            });
+
+            var request = new HttpRequestMessage(HttpMethod.Get, server.Address);
+            request.Version = HttpVersion.Version30;
+            request.VersionPolicy = HttpVersionPolicy.RequestVersionExact;
+
+            var response = await client.SendAsync(request);
+
+            response.EnsureSuccessStatusCode();
+            Assert.Equal(HttpVersion.Version30, response.Version);
+            Assert.Same(request, callbackRequest);
+            Assert.Equal(1, invocationCount);
+
+            // Second request, the callback shouldn't be hit at all.
+            callbackRequest = null;
+
+            request = new HttpRequestMessage(HttpMethod.Get, server.Address);
+            request.Version = HttpVersion.Version30;
+            request.VersionPolicy = HttpVersionPolicy.RequestVersionExact;
+
+            response = await client.SendAsync(request);
+
+            response.EnsureSuccessStatusCode();
+            Assert.Equal(HttpVersion.Version30, response.Version);
+            Assert.Null(callbackRequest);
+            Assert.Equal(1, invocationCount);
+        }
+
         [OuterLoop]
         [ConditionalTheory(nameof(IsMsQuicSupported))]
         [MemberData(nameof(InteropUris))]
+        [ActiveIssue("https://github.com/dotnet/runtime/issues/54726")]
         public async Task Public_Interop_ExactVersion_Success(string uri)
         {
+            if (UseQuicImplementationProvider == QuicImplementationProviders.Mock)
+            {
+                return;
+            }
+
             using HttpClient client = CreateHttpClient();
             using HttpRequestMessage request = new HttpRequestMessage
             {
@@ -132,7 +391,7 @@ namespace System.Net.Http.Functional.Tests
                 Version = HttpVersion.Version30,
                 VersionPolicy = HttpVersionPolicy.RequestVersionExact
             };
-            using HttpResponseMessage response = await client.SendAsync(request).TimeoutAfter(20_000);
+            using HttpResponseMessage response = await client.SendAsync(request).WaitAsync(TimeSpan.FromSeconds(20));
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.Equal(3, response.Version.Major);
@@ -141,8 +400,14 @@ namespace System.Net.Http.Functional.Tests
         [OuterLoop]
         [ConditionalTheory(nameof(IsMsQuicSupported))]
         [MemberData(nameof(InteropUris))]
+        [ActiveIssue("https://github.com/dotnet/runtime/issues/54726")]
         public async Task Public_Interop_Upgrade_Success(string uri)
         {
+            if (UseQuicImplementationProvider == QuicImplementationProviders.Mock)
+            {
+                return;
+            }
+
             using HttpClient client = CreateHttpClient();
 
             // First request uses HTTP/1 or HTTP/2 and receives an Alt-Svc either by header or (with HTTP/2) by frame.
@@ -155,7 +420,7 @@ namespace System.Net.Http.Functional.Tests
                 VersionPolicy = HttpVersionPolicy.RequestVersionOrLower
             })
             {
-                using HttpResponseMessage responseA = await client.SendAsync(requestA).TimeoutAfter(20_000);
+                using HttpResponseMessage responseA = await client.SendAsync(requestA).WaitAsync(TimeSpan.FromSeconds(20));
                 Assert.Equal(HttpStatusCode.OK, responseA.StatusCode);
                 Assert.NotEqual(3, responseA.Version.Major);
             }
@@ -170,7 +435,7 @@ namespace System.Net.Http.Functional.Tests
                 VersionPolicy = HttpVersionPolicy.RequestVersionOrLower
             })
             {
-                using HttpResponseMessage responseB = await client.SendAsync(requestB).TimeoutAfter(20_000);
+                using HttpResponseMessage responseB = await client.SendAsync(requestB).WaitAsync(TimeSpan.FromSeconds(20));
 
                 Assert.Equal(HttpStatusCode.OK, responseB.StatusCode);
                 Assert.NotEqual(3, responseB.Version.Major);

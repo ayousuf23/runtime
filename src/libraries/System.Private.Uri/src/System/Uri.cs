@@ -144,7 +144,7 @@ namespace System
             Debug.Assert((_flags & Flags.Debug_LeftConstructor) == 0);
         }
 
-        private class UriInfo
+        private sealed class UriInfo
         {
             public Offset Offset;
             public string? String;
@@ -184,7 +184,7 @@ namespace System
             public ushort End;
         };
 
-        private class MoreInfo
+        private sealed class MoreInfo
         {
             public string? Path;
             public string? Query;
@@ -2667,7 +2667,7 @@ namespace System
                         case UriFormat.UriEscaped:
                             if (NotAny(Flags.UserEscaped))
                             {
-                                UriHelper.EscapeString(slice, ref dest, checkExistingEscaped: true, '?', '#');;
+                                UriHelper.EscapeString(slice, ref dest, checkExistingEscaped: true, '?', '#');
                             }
                             else
                             {
@@ -4824,27 +4824,22 @@ namespace System
                     // For compatibility with V1.0 parser we restrict the compression scope to Unc Share, i.e. \\host\share\
                     if (basePart.IsUnc)
                     {
-                        string share = basePart.GetParts(UriComponents.Path | UriComponents.KeepDelimiter,
-                            UriFormat.Unescaped);
+                        ReadOnlySpan<char> share = basePart.GetParts(UriComponents.Path | UriComponents.KeepDelimiter, UriFormat.Unescaped);
                         for (int i = 1; i < share.Length; ++i)
                         {
                             if (share[i] == '/')
                             {
-                                share = share.Substring(0, i);
+                                share = share.Slice(0, i);
                                 break;
                             }
                         }
+
                         if (basePart.IsImplicitFile)
                         {
-                            return @"\\"
-                                    + basePart.GetParts(UriComponents.Host, UriFormat.Unescaped)
-                                    + share
-                                    + relativePart;
+                            return string.Concat(@"\\", basePart.GetParts(UriComponents.Host, UriFormat.Unescaped), share, relativePart);
                         }
-                        return "file://"
-                                + basePart.GetParts(UriComponents.Host, uriFormat)
-                                + share
-                                + relativePart;
+
+                        return string.Concat("file://", basePart.GetParts(UriComponents.Host, uriFormat), share, relativePart);
                     }
                     // It's not obvious but we've checked (for this relativePart format) that baseUti is nor UNC nor DOS path
                     //
@@ -4869,12 +4864,10 @@ namespace System
                     return basePart.Scheme + ':' + relativePart;
                 }
 
-                // Got absolute relative path, and the base is nor FILE nor a DOS path (checked at the method start)
+                // Got absolute relative path, and the base is not FILE nor a DOS path (checked at the method start)
                 if (basePart.HostType == Flags.IPv6HostType)
                 {
-                    left = basePart.GetParts(UriComponents.Scheme | UriComponents.UserInfo, uriFormat)
-                                     + '[' + basePart.DnsSafeHost + ']'
-                                     + basePart.GetParts(UriComponents.KeepDelimiter | UriComponents.Port, uriFormat);
+                    left = $"{basePart.GetParts(UriComponents.Scheme | UriComponents.UserInfo, uriFormat)}[{basePart.DnsSafeHost}]{basePart.GetParts(UriComponents.KeepDelimiter | UriComponents.Port, uriFormat)}";
                 }
                 else
                 {

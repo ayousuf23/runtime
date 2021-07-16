@@ -113,6 +113,7 @@ typedef enum {
 	WRAPPER_SUBTYPE_RUNTIME_INVOKE_VIRTUAL,
 	/* Subtypes of MONO_WRAPPER_MANAGED_TO_NATIVE */
 	WRAPPER_SUBTYPE_ICALL_WRAPPER, // specifically JIT icalls
+	WRAPPER_SUBTYPE_NATIVE_FUNC,
 	WRAPPER_SUBTYPE_NATIVE_FUNC_AOT,
 	WRAPPER_SUBTYPE_NATIVE_FUNC_INDIRECT,
 	WRAPPER_SUBTYPE_PINVOKE,
@@ -209,7 +210,8 @@ typedef enum {
 	AOT_INIT_METHOD = 0,
 	AOT_INIT_METHOD_GSHARED_MRGCTX = 1,
 	AOT_INIT_METHOD_GSHARED_THIS = 2,
-	AOT_INIT_METHOD_GSHARED_VTABLE = 3
+	AOT_INIT_METHOD_GSHARED_VTABLE = 3,
+	AOT_INIT_METHOD_NUM = 4
 } MonoAotInitSubtype;
 
 typedef struct {
@@ -363,9 +365,6 @@ mono_marshal_init (void);
 void
 mono_marshal_init_tls (void);
 
-void
-mono_marshal_cleanup (void);
-
 gint32
 mono_class_native_size (MonoClass *klass, guint32 *align);
 
@@ -405,7 +404,7 @@ mono_type_to_stind (MonoType *type);
 
 /* functions to create various architecture independent helper functions */
 
-MonoMethod *
+MONO_COMPONENT_API MonoMethod *
 mono_marshal_method_from_wrapper (MonoMethod *wrapper);
 
 WrapperInfo*
@@ -414,7 +413,7 @@ mono_wrapper_info_create (MonoMethodBuilder *mb, WrapperSubtype subtype);
 void
 mono_marshal_set_wrapper_info (MonoMethod *method, WrapperInfo *info);
 
-WrapperInfo*
+MONO_COMPONENT_API WrapperInfo*
 mono_marshal_get_wrapper_info (MonoMethod *wrapper);
 
 MonoMethod *
@@ -551,9 +550,6 @@ mono_marshal_free_array (gpointer *ptr, int size);
 gboolean 
 mono_marshal_free_ccw (MonoObject* obj);
 
-void
-mono_cominterop_release_all_rcws (void); 
-
 MONO_API void *
 mono_marshal_string_to_utf16 (MonoString *s);
 
@@ -617,12 +613,12 @@ gpointer
 mono_marshal_lookup_pinvoke (MonoMethod *method);
 
 ICALL_EXPORT
-guint32 
-ves_icall_System_Runtime_InteropServices_Marshal_GetLastWin32Error (void);
+guint32
+ves_icall_System_Runtime_InteropServices_Marshal_GetLastPInvokeError (void);
 
 ICALL_EXPORT
 void
-ves_icall_System_Runtime_InteropServices_Marshal_SetLastWin32Error (guint32 err);
+ves_icall_System_Runtime_InteropServices_Marshal_SetLastPInvokeError (guint32 err);
 
 ICALL_EXPORT
 mono_bstr

@@ -12,7 +12,7 @@ namespace System.Runtime.InteropServices.JavaScript
 {
     public static class Runtime
     {
-        private static readonly Dictionary<int, WeakReference> _boundObjects = new Dictionary<int, WeakReference>();
+        private static readonly Dictionary<int, WeakReference<JSObject>> _boundObjects = new Dictionary<int, WeakReference<JSObject>>();
         private static readonly Dictionary<object, JSObject> _rawToJS = new Dictionary<object, JSObject>();
         // _weakDelegateTable is a ConditionalWeakTable with the Delegate and associated JSObject:
         // Key Lifetime:
@@ -77,49 +77,48 @@ namespace System.Runtime.InteropServices.JavaScript
 
         public static int BindJSObject(int jsId, bool ownsHandle, int mappedType)
         {
-            WeakReference? reference;
+            JSObject? target = null;
+
             lock (_boundObjects)
             {
-                if (_boundObjects.TryGetValue(jsId, out reference))
-                {
-                    if ((reference.Target == null) || ((reference.Target as JSObject)?.IsDisposed == true))
-                    {
-                        _boundObjects.Remove(jsId);
-                        reference = null;
-                    }
-                }
-
-                if (reference == null)
+                if (!_boundObjects.TryGetValue(jsId, out WeakReference<JSObject>? reference) ||
+                    !reference.TryGetTarget(out target) ||
+                    target.IsDisposed)
                 {
                     IntPtr jsIntPtr = (IntPtr)jsId;
-                    reference = new WeakReference(mappedType > 0 ? BindJSType(jsIntPtr, ownsHandle, mappedType) : new JSObject(jsIntPtr, ownsHandle), true);
-                    _boundObjects.Add(jsId, reference);
+                    target = mappedType > 0 ? BindJSType(jsIntPtr, ownsHandle, mappedType) : new JSObject(jsIntPtr, ownsHandle);
+                    _boundObjects[jsId] = new WeakReference<JSObject>(target, trackResurrection: true);
                 }
             }
-            return reference.Target is JSObject target ? target.Int32Handle : 0;
+
+            target.AddInFlight();
+
+            return target.Int32Handle;
         }
 
         public static int BindCoreCLRObject(int jsId, int gcHandle)
         {
             GCHandle h = (GCHandle)(IntPtr)gcHandle;
-            JSObject? obj;
+            JSObject? obj = null;
 
             lock (_boundObjects)
             {
-                if (_boundObjects.TryGetValue(jsId, out WeakReference? existingObj))
+                if (_boundObjects.TryGetValue(jsId, out WeakReference<JSObject>? wr))
                 {
-                    var instance = existingObj.Target as JSObject;
-                    if (instance?.Int32Handle != (int)(IntPtr)h && h.IsAllocated)
+                    if (!wr.TryGetTarget(out JSObject? instance) || (instance.Int32Handle != (int)(IntPtr)h && h.IsAllocated))
+                    {
                         throw new JSException(SR.Format(SR.MultipleHandlesPointingJsId, jsId));
+                    }
 
                     obj = instance;
                 }
-                else
+                else if (h.Target is JSObject instance)
                 {
-                    obj = h.Target as JSObject;
-                    _boundObjects.Add(jsId, new WeakReference(obj, true));
+                    _boundObjects.Add(jsId, new WeakReference<JSObject>(instance, trackResurrection: true));
+                    obj = instance;
                 }
             }
+
             return obj?.Int32Handle ?? 0;
         }
 
@@ -199,7 +198,7 @@ namespace System.Runtime.InteropServices.JavaScript
                 jsObject = new JSObject(jsId, dele);
                 lock (_boundObjects)
                 {
-                    _boundObjects.Add(jsId, new WeakReference(jsObject));
+                    _boundObjects.Add(jsId, new WeakReference<JSObject>(jsObject));
                 }
                 lock (_weakDelegateTable)
                 {
@@ -239,12 +238,21 @@ namespace System.Runtime.InteropServices.JavaScript
             return jsObject?.JSHandle ?? -1;
         }
 
-        public static object? GetDotNetObject(int gcHandle)
+        /// <param name="gcHandle"></param>
+        /// <param name="shouldAddInflight">when true, we would create Normal GCHandle to the JSObject, so that it would not get collected before passing it back to managed code</param>
+        public static object? GetDotNetObject(int gcHandle, int shouldAddInflight)
         {
             GCHandle h = (GCHandle)(IntPtr)gcHandle;
 
-            return h.Target is JSObject js ?
-                js.GetWrappedObject() ?? h.Target : h.Target;
+            if (h.Target is JSObject jso)
+            {
+                if (shouldAddInflight != 0)
+                {
+                    jso.AddInFlight();
+                }
+                return jso.GetWrappedObject() ?? jso;
+            }
+            return h.Target;
         }
 
         public static bool IsSimpleArray(object a)
@@ -486,10 +494,11 @@ namespace System.Runtime.InteropServices.JavaScript
 #endif
             lock (_boundObjects)
             {
-                if (_boundObjects.TryGetValue(jsId, out WeakReference? reference))
+                if (_boundObjects.TryGetValue(jsId, out WeakReference<JSObject>? reference))
                 {
-                    Debug.Assert(reference.Target != null, $"\tSafeHandleReleaseByHandle: did not find active target {jsId} / target: {reference.Target}");
-                    SafeHandleRelease((AnyRef)reference.Target);
+                    reference.TryGetTarget(out JSObject? target);
+                    Debug.Assert(target != null, $"\tSafeHandleReleaseByHandle: did not find active target {jsId}");
+                    SafeHandleRelease(target);
                 }
                 else
                 {

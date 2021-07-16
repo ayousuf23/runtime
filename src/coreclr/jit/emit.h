@@ -190,6 +190,8 @@ public:
 
     UNATIVE_OFFSET GetFuncletPrologOffset(emitter* emit) const;
 
+    bool IsPreviousInsNum(emitter* emit) const;
+
 #ifdef DEBUG
     void Print(LONG compMethodID) const;
 #endif // DEBUG
@@ -243,6 +245,11 @@ struct insGroup
 #if defined(DEBUG) || defined(LATE_DISASM)
     BasicBlock::weight_t igWeight;    // the block weight used for this insGroup
     double               igPerfScore; // The PerfScore for this insGroup
+#endif
+
+#ifdef DEBUG
+    BasicBlock*               lastGeneratedBlock; // The last block that generated code into this insGroup.
+    jitstd::list<BasicBlock*> igBlocks;           // All the blocks that generated code into this insGroup.
 #endif
 
     UNATIVE_OFFSET igNum;     // for ordering (and display) purposes
@@ -1227,6 +1234,8 @@ protected:
 
 #define PERFSCORE_THROUGHPUT_ILLEGAL -1024.0f
 
+#define PERFSCORE_THROUGHPUT_ZERO 0.0f // Only used for pseudo-instructions that don't generate code
+
 #define PERFSCORE_THROUGHPUT_6X (1.0f / 6.0f) // Hextuple issue
 #define PERFSCORE_THROUGHPUT_5X 0.20f         // Pentuple issue
 #define PERFSCORE_THROUGHPUT_4X 0.25f         // Quad issue
@@ -1616,9 +1625,10 @@ public:
     bool emitIssuing;
 #endif
 
-    BYTE* emitCodeBlock;     // Hot code block
-    BYTE* emitColdCodeBlock; // Cold code block
-    BYTE* emitConsBlock;     // Read-only (constant) data block
+    BYTE*  emitCodeBlock;     // Hot code block
+    BYTE*  emitColdCodeBlock; // Cold code block
+    BYTE*  emitConsBlock;     // Read-only (constant) data block
+    size_t writeableOffset;   // Offset applied to a code address to get memory location that can be written
 
     UNATIVE_OFFSET emitTotalHotCodeSize;
     UNATIVE_OFFSET emitTotalColdCodeSize;
@@ -1759,12 +1769,12 @@ private:
     void          emitJumpDistBind(); // Bind all the local jumps in method
 
 #if FEATURE_LOOP_ALIGN
-    instrDescAlign* emitCurIGAlignList;          // list of align instructions in current IG
-    unsigned        emitLastInnerLoopStartIgNum; // Start IG of last inner loop
-    unsigned        emitLastInnerLoopEndIgNum;   // End IG of last inner loop
-    unsigned        emitLastAlignedIgNum;        // last IG that has align instruction
-    instrDescAlign* emitAlignList;               // list of local align instructions in method
-    instrDescAlign* emitAlignLast;               // last align instruction in method
+    instrDescAlign* emitCurIGAlignList;   // list of align instructions in current IG
+    unsigned        emitLastLoopStart;    // Start IG of last inner loop
+    unsigned        emitLastLoopEnd;      // End IG of last inner loop
+    unsigned        emitLastAlignedIgNum; // last IG that has align instruction
+    instrDescAlign* emitAlignList;        // list of local align instructions in method
+    instrDescAlign* emitAlignLast;        // last align instruction in method
     unsigned getLoopSize(insGroup* igLoopHeader,
                          unsigned maxLoopSize DEBUG_ARG(bool isAlignAdjusted)); // Get the smallest loop size
     void emitLoopAlignment();
@@ -1896,11 +1906,20 @@ private:
     // Sets the emitter's record of the currently live GC variables
     // and registers.  The "isFinallyTarget" parameter indicates that the current location is
     // the start of a basic block that is returned to after a finally clause in non-exceptional execution.
-    void* emitAddLabel(VARSET_VALARG_TP GCvars, regMaskTP gcrefRegs, regMaskTP byrefRegs, BOOL isFinallyTarget = FALSE);
+    void* emitAddLabel(VARSET_VALARG_TP GCvars,
+                       regMaskTP        gcrefRegs,
+                       regMaskTP        byrefRegs,
+                       bool             isFinallyTarget = false DEBUG_ARG(BasicBlock* block = nullptr));
+
     // Same as above, except the label is added and is conceptually "inline" in
     // the current block. Thus it extends the previous block and the emitter
     // continues to track GC info as if there was no label.
     void* emitAddInlineLabel();
+
+#ifdef DEBUG
+    void emitPrintLabel(insGroup* ig);
+    const char* emitLabelString(insGroup* ig);
+#endif
 
 #ifdef TARGET_ARMARCH
 
@@ -1944,7 +1963,7 @@ private:
     instrDescJmp* emitAllocInstrJmp()
     {
 #if EMITTER_STATS
-        emitTotalDescAlignCnt++;
+        emitTotalIDescJmpCnt++;
 #endif // EMITTER_STATS
         return (instrDescJmp*)emitAllocAnyInstr(sizeof(instrDescJmp), EA_1BYTE);
     }
@@ -2023,7 +2042,7 @@ private:
     instrDescAlign* emitAllocInstrAlign()
     {
 #if EMITTER_STATS
-        emitTotalIDescJmpCnt++;
+        emitTotalDescAlignCnt++;
 #endif // EMITTER_STATS
         return (instrDescAlign*)emitAllocAnyInstr(sizeof(instrDescAlign), EA_1BYTE);
     }

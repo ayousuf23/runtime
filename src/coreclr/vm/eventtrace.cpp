@@ -321,7 +321,7 @@ ETW::SamplingLog::EtwStackWalkStatus ETW::SamplingLog::SaveCurrentStack(int skip
         return ETW::SamplingLog::UnInitialized;
     }
 #endif // TARGET_AMD64
-    Thread *pThread = GetThread();
+    Thread *pThread = GetThreadNULLOk();
     if (pThread == NULL)
     {
         return ETW::SamplingLog::UnInitialized;
@@ -682,13 +682,13 @@ void ETW::GCLog::MovedReference(
     // ProfAPI
     if (fAllowProfApiNotification)
     {
-        BEGIN_PIN_PROFILER(CORProfilerTrackGC() || CORProfilerTrackGCMovedObjects());
-        g_profControlBlock.pProfInterface->MovedReference(pbMemBlockStart,
+        BEGIN_PROFILER_CALLBACK(CORProfilerTrackGC() || CORProfilerTrackGCMovedObjects());
+        (&g_profControlBlock)->MovedReference(pbMemBlockStart,
                                                           pbMemBlockEnd,
                                                           cbRelocDistance,
                                                           &(pCtxForEtwAndProfapi->pctxProfAPI),
                                                           fCompacting);
-        END_PIN_PROFILER();
+        END_PROFILER_CALLBACK();
     }
 #endif // PROFILING_SUPPORTED
 
@@ -808,9 +808,9 @@ VOID ETW::GCLog::EndMovedReferences(size_t profilingContext, BOOL fAllowProfApiN
     // ProfAPI
     if (fAllowProfApiNotification)
     {
-        BEGIN_PIN_PROFILER(CORProfilerTrackGC() || CORProfilerTrackGCMovedObjects());
-        g_profControlBlock.pProfInterface->EndMovedReferences(&(pCtxForEtwAndProfapi->pctxProfAPI));
-        END_PIN_PROFILER();
+        BEGIN_PROFILER_CALLBACK(CORProfilerTrackGC() || CORProfilerTrackGCMovedObjects());
+        (&g_profControlBlock)->EndMovedReferences(&(pCtxForEtwAndProfapi->pctxProfAPI));
+        END_PROFILER_CALLBACK();
     }
 #endif //PROFILING_SUPPORTED
 
@@ -3340,7 +3340,7 @@ BOOL ETW::TypeSystemLog::ShouldLogType(TypeHandle th)
 
     // When we have a thread context, default to calling the API that requires one which
     // reduces the cost of locking.
-    if (GetThread() != NULL)
+    if (GetThreadNULLOk() != NULL)
     {
         LookupOrCreateTypeLoggingInfo(th, &fCreatedNew);
     }
@@ -4417,6 +4417,12 @@ VOID EtwCallbackCommon(
     {
         ETW::TypeSystemLog::OnKeywordsChanged();
     }
+
+    if (g_fEEStarted && !g_fEEShutDown)
+    {
+        // Emit the YieldProcessor measured values at the beginning of the trace
+        YieldProcessorNormalization::FireMeasurementEvents();
+    }
 }
 
 // Individual callbacks for each EventPipe provider.
@@ -4701,7 +4707,7 @@ VOID ETW::ExceptionLog::ExceptionThrown(CrawlFrame  *pCf, BOOL bIsReThrownExcept
     CONTRACTL {
         NOTHROW;
         GC_TRIGGERS;
-        PRECONDITION(GetThread() != NULL);
+        PRECONDITION(GetThreadNULLOk() != NULL);
         PRECONDITION(GetThread()->GetThrowable() != NULL);
     } CONTRACTL_END;
 
@@ -5045,7 +5051,7 @@ VOID ETW::InfoLog::RuntimeInformation(INT32 type)
         {
             PCWSTR szDtraceOutput1=W(""),szDtraceOutput2=W("");
             UINT8 startupMode = 0;
-            UINT startupFlags = 0;
+            UINT startupFlags = CorHost2::GetStartupFlags();
             PathString dllPath;
             UINT8 Sku = ETW::InfoLog::InfoStructs::CoreCLR;
 

@@ -111,7 +111,7 @@ namespace System.Globalization.Tests
 
         public static IEnumerable<object[]> NativeName_TestData()
         {
-            if (PlatformDetection.IsNotBrowser)
+            if (PlatformDetection.IsNotUsingLimitedCultures)
             {
                 yield return new object[] { "GB", "United Kingdom" };
                 yield return new object[] { "SE", "Sverige" };
@@ -128,6 +128,7 @@ namespace System.Globalization.Tests
 
         [Theory]
         [MemberData(nameof(NativeName_TestData))]
+        [ActiveIssue("https://github.com/dotnet/runtime/issues/36672", TestPlatforms.Android)]
         public void NativeName(string name, string expected)
         {
             Assert.Equal(expected, new RegionInfo(name).NativeName);
@@ -135,7 +136,7 @@ namespace System.Globalization.Tests
 
         public static IEnumerable<object[]> EnglishName_TestData()
         {
-            if (PlatformDetection.IsNotBrowser)
+            if (PlatformDetection.IsNotUsingLimitedCultures)
             {
                 yield return new object[] { "en-US", new string[] { "United States" } };
                 yield return new object[] { "US", new string[] { "United States" } };
@@ -154,6 +155,7 @@ namespace System.Globalization.Tests
 
         [Theory]
         [MemberData(nameof(EnglishName_TestData))]
+        [ActiveIssue("https://github.com/dotnet/runtime/issues/36672", TestPlatforms.Android)]
         public void EnglishName(string name, string[] expected)
         {
             string result = new RegionInfo(name).EnglishName;
@@ -211,12 +213,13 @@ namespace System.Globalization.Tests
 
         [Theory]
         [MemberData(nameof(RegionInfo_TestData))]
+        [ActiveIssue("https://github.com/dotnet/runtime/issues/36672", TestPlatforms.Android)]
         public void MiscTest(int lcid, int geoId, string currencyEnglishName, string currencyShortName, string alternativeCurrencyEnglishName, string currencyNativeName, string threeLetterISORegionName, string threeLetterWindowsRegionName)
         {
             RegionInfo ri = new RegionInfo(lcid); // create it with lcid
             Assert.Equal(geoId, ri.GeoId);
 
-            if (PlatformDetection.IsBrowser)
+            if (PlatformDetection.IsUsingLimitedCultures)
             {
                 Assert.Equal(currencyShortName, ri.CurrencyEnglishName);
                 Assert.Equal(currencyShortName, ri.CurrencyNativeName);

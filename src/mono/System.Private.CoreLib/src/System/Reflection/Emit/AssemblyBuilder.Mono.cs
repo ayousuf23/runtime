@@ -43,7 +43,7 @@ using System.Runtime.InteropServices;
 
 namespace System.Reflection.Emit
 {
-    internal class GenericInstanceKey
+    internal sealed class GenericInstanceKey
     {
         private Type gtd;
         internal Type[] args;
@@ -360,7 +360,12 @@ namespace System.Reflection.Emit
             return null;
         }
 
-        public override Module[] GetModules(bool getResourceModules) => (Module[])modules.Clone();
+        public override Module[] GetModules(bool getResourceModules)
+        {
+            if (modules == null)
+                return Array.Empty<Module>();
+            return (Module[])modules.Clone();
+        }
 
         public override AssemblyName GetName(bool copiedName) => AssemblyName.Create(_mono_assembly, null);
 

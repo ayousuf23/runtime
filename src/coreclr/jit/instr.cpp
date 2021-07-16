@@ -24,11 +24,12 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 /*****************************************************************************/
 #ifdef DEBUG
 
-/*****************************************************************************
- *
- *  Returns the string representation of the given CPU instruction.
- */
-
+//-----------------------------------------------------------------------------
+// genInsName: Returns the string representation of the given CPU instruction, as
+// it exists in the instruction table. Note that some architectures don't encode the
+// name completely in the table: xarch sometimes prepends a "v", and arm sometimes
+// appends a "s". Use `genInsDisplayName()` to get a fully-formed name.
+//
 const char* CodeGen::genInsName(instruction ins)
 {
     // clang-format off
@@ -77,36 +78,36 @@ const char* CodeGen::genInsName(instruction ins)
     return insNames[ins];
 }
 
-void __cdecl CodeGen::instDisp(instruction ins, bool noNL, const char* fmt, ...)
+//-----------------------------------------------------------------------------
+// genInsDisplayName: Get a fully-formed instruction display name. This only handles
+// the xarch case of prepending a "v", not the arm case of appending an "s".
+// This can be called up to four times in a single 'printf' before the static buffers
+// get reused.
+//
+// Returns:
+//    String with instruction name
+//
+const char* CodeGen::genInsDisplayName(emitter::instrDesc* id)
 {
-    if (compiler->opts.dspCode)
+    instruction ins     = id->idIns();
+    const char* insName = genInsName(ins);
+
+#ifdef TARGET_XARCH
+    const int       TEMP_BUFFER_LEN = 40;
+    static unsigned curBuf          = 0;
+    static char     buf[4][TEMP_BUFFER_LEN];
+    const char*     retbuf;
+
+    if (GetEmitter()->IsAVXInstruction(ins) && !GetEmitter()->IsBMIInstruction(ins))
     {
-        /* Display the instruction offset within the emit block */
-
-        //      printf("[%08X:%04X]", GetEmitter().emitCodeCurBlock(), GetEmitter().emitCodeOffsInBlock());
-
-        /* Display the FP stack depth (before the instruction is executed) */
-
-        //      printf("[FP=%02u] ", genGetFPstkLevel());
-
-        /* Display the instruction mnemonic */
-        printf("        ");
-
-        printf("            %-8s", genInsName(ins));
-
-        if (fmt)
-        {
-            va_list args;
-            va_start(args, fmt);
-            vprintf(fmt, args);
-            va_end(args);
-        }
-
-        if (!noNL)
-        {
-            printf("\n");
-        }
+        sprintf_s(buf[curBuf], TEMP_BUFFER_LEN, "v%s", insName);
+        retbuf = buf[curBuf];
+        curBuf = (curBuf + 1) % 4;
+        return retbuf;
     }
+#endif // TARGET_XARCH
+
+    return insName;
 }
 
 /*****************************************************************************/
@@ -396,14 +397,76 @@ void CodeGen::inst_RV(instruction ins, regNumber reg, var_types type, emitAttr s
 
 /*****************************************************************************
  *
+ *  Generate a "mov reg1, reg2" instruction.
+ */
+void CodeGen::inst_Mov(var_types dstType,
+                       regNumber dstReg,
+                       regNumber srcReg,
+                       bool      canSkip,
+                       emitAttr  size,
+                       insFlags  flags /* = INS_FLAGS_DONT_CARE */)
+{
+    instruction ins = ins_Copy(srcReg, dstType);
+
+    if (size == EA_UNKNOWN)
+    {
+        size = emitActualTypeSize(dstType);
+    }
+
+#ifdef TARGET_ARM
+    GetEmitter()->emitIns_Mov(ins, size, dstReg, srcReg, canSkip, flags);
+#else
+    GetEmitter()->emitIns_Mov(ins, size, dstReg, srcReg, canSkip);
+#endif
+}
+
+/*****************************************************************************
+ *
+ *  Generate a "mov reg1, reg2" instruction.
+ */
+void CodeGen::inst_Mov_Extend(var_types srcType,
+                              bool      srcInReg,
+                              regNumber dstReg,
+                              regNumber srcReg,
+                              bool      canSkip,
+                              emitAttr  size,
+                              insFlags  flags /* = INS_FLAGS_DONT_CARE */)
+{
+    instruction ins = ins_Move_Extend(srcType, srcInReg);
+
+    if (size == EA_UNKNOWN)
+    {
+        size = emitActualTypeSize(srcType);
+    }
+
+#ifdef TARGET_ARM
+    GetEmitter()->emitIns_Mov(ins, size, dstReg, srcReg, canSkip, flags);
+#else
+    GetEmitter()->emitIns_Mov(ins, size, dstReg, srcReg, canSkip);
+#endif
+}
+
+/*****************************************************************************
+ *
  *  Generate a "op reg1, reg2" instruction.
  */
 
+//------------------------------------------------------------------------
+// inst_RV_RV: Generate a "op reg1, reg2" instruction.
+//
+// Arguments:
+//    ins   - the instruction to generate;
+//    reg1  - the first register to use, the dst for most instructions;
+//    reg2  - the second register to use, the src for most instructions;
+//    type  - the type used to get the size attribute if not given, usually type of the reg2 operand;
+//    size  - the size attribute, the type arg is ignored if this arg is provided with an actual value;
+//    flags - whether flags are set for arm32.
+//
 void CodeGen::inst_RV_RV(instruction ins,
                          regNumber   reg1,
                          regNumber   reg2,
-                         var_types   type,
-                         emitAttr    size,
+                         var_types   type /* = TYP_I_IMPL */,
+                         emitAttr    size /* = EA_UNKNOWN */,
                          insFlags    flags /* = INS_FLAGS_DONT_CARE */)
 {
     if (size == EA_UNKNOWN)
@@ -1559,7 +1622,8 @@ instruction CodeGen::ins_Move_Extend(var_types srcType, bool srcInReg)
     if (varTypeIsFloating(srcType))
         return INS_vmov;
 #else
-    assert(!varTypeIsFloating(srcType));
+    if (varTypeIsFloating(srcType))
+        return INS_mov;
 #endif
 
 #if defined(TARGET_XARCH)

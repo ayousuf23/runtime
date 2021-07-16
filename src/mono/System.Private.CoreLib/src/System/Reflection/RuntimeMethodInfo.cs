@@ -139,7 +139,7 @@ namespace System.Reflection
 
 #region Sync with _MonoReflectionMethod in object-internals.h
     [StructLayout(LayoutKind.Sequential)]
-    internal class RuntimeMethodInfo : MethodInfo
+    internal sealed class RuntimeMethodInfo : MethodInfo
     {
 #pragma warning disable 649
         internal IntPtr mhandle;
@@ -154,14 +154,6 @@ namespace System.Reflection
             get
             {
                 return GetRuntimeModule();
-            }
-        }
-
-        private RuntimeType? ReflectedTypeInternal
-        {
-            get
-            {
-                return (RuntimeType?)ReflectedType;
             }
         }
 
@@ -765,7 +757,7 @@ namespace System.Reflection
     }
 #region Sync with _MonoReflectionMethod in object-internals.h
     [StructLayout(LayoutKind.Sequential)]
-    internal class RuntimeConstructorInfo : ConstructorInfo
+    internal sealed class RuntimeConstructorInfo : ConstructorInfo
     {
 #pragma warning disable 649
         internal IntPtr mhandle;
@@ -786,14 +778,6 @@ namespace System.Reflection
         internal RuntimeModule GetRuntimeModule()
         {
             return RuntimeTypeHandle.GetModule((RuntimeType)DeclaringType);
-        }
-
-        private RuntimeType? ReflectedTypeInternal
-        {
-            get
-            {
-                return (RuntimeType?)ReflectedType;
-            }
         }
 
         public override MethodImplAttributes GetMethodImplementationFlags()

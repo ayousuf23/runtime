@@ -2,6 +2,9 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+using System.Text.Json.Serialization.Metadata;
 
 namespace System.Text.Json.Serialization.Converters
 {
@@ -9,12 +12,22 @@ namespace System.Text.Json.Serialization.Converters
         : IEnumerableDefaultConverter<TCollection, TElement>
         where TCollection : IEnumerable<TElement>
     {
+        [RequiresUnreferencedCode(IEnumerableConverterFactoryHelpers.ImmutableConvertersUnreferencedCodeMessage)]
+        public ImmutableEnumerableOfTConverter()
+        {
+        }
+
+        // Used by source-gen initialization for reflection-free serialization.
+        public ImmutableEnumerableOfTConverter(bool dummy) { }
+
         protected override void Add(in TElement value, ref ReadStack state)
         {
             ((List<TElement>)state.Current.ReturnValue!).Add(value);
         }
 
         internal override bool CanHaveIdMetadata => false;
+
+        internal override bool RequiresDynamicMemberAccessors => true;
 
         protected override void CreateCollection(ref Utf8JsonReader reader, ref ReadStack state, JsonSerializerOptions options)
         {
@@ -23,15 +36,10 @@ namespace System.Text.Json.Serialization.Converters
 
         protected override void ConvertCollection(ref ReadStack state, JsonSerializerOptions options)
         {
-            JsonClassInfo classInfo = state.Current.JsonClassInfo;
+            JsonTypeInfo typeInfo = state.Current.JsonTypeInfo;
 
-            Func<IEnumerable<TElement>, TCollection>? creator = (Func<IEnumerable<TElement>, TCollection>?)classInfo.CreateObjectWithArgs;
-            if (creator == null)
-            {
-                creator = options.MemberAccessorStrategy.CreateImmutableEnumerableCreateRangeDelegate<TCollection, TElement>();
-                classInfo.CreateObjectWithArgs = creator;
-            }
-
+            Func<IEnumerable<TElement>, TCollection>? creator = (Func<IEnumerable<TElement>, TCollection>?)typeInfo.CreateObjectWithArgs;
+            Debug.Assert(creator != null);
             state.Current.ReturnValue = creator((List<TElement>)state.Current.ReturnValue!);
         }
 
@@ -43,6 +51,7 @@ namespace System.Text.Json.Serialization.Converters
                 enumerator = value.GetEnumerator();
                 if (!enumerator.MoveNext())
                 {
+                    enumerator.Dispose();
                     return true;
                 }
             }
@@ -68,7 +77,16 @@ namespace System.Text.Json.Serialization.Converters
                 }
             } while (enumerator.MoveNext());
 
+            enumerator.Dispose();
             return true;
+        }
+
+        [UnconditionalSuppressMessage("ReflectionAnalysis", "IL2026:RequiresUnreferencedCode",
+            Justification = "The ctor is marked RequiresUnreferencedCode.")]
+        internal override void Initialize(JsonSerializerOptions options, JsonTypeInfo? jsonTypeInfo = null)
+        {
+            Debug.Assert(jsonTypeInfo != null);
+            jsonTypeInfo.CreateObjectWithArgs = options.MemberAccessorStrategy.CreateImmutableEnumerableCreateRangeDelegate<TCollection, TElement>();
         }
     }
 }

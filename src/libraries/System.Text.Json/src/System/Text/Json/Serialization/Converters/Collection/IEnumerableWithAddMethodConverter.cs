@@ -3,6 +3,8 @@
 
 using System.Collections;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+using System.Text.Json.Serialization.Metadata;
 
 namespace System.Text.Json.Serialization.Converters
 {
@@ -10,17 +12,23 @@ namespace System.Text.Json.Serialization.Converters
         : IEnumerableDefaultConverter<TCollection, object?>
         where TCollection : IEnumerable
     {
+        [RequiresUnreferencedCode(JsonSerializer.SerializationUnreferencedCodeMessage)]
+        public IEnumerableWithAddMethodConverter() { }
+
+        // Used by source-gen initialization for reflection-free serialization.
+        public IEnumerableWithAddMethodConverter(bool dummy) { }
+
         protected override void Add(in object? value, ref ReadStack state)
         {
-            var addMethodDelegate = ((Action<TCollection, object?>?)state.Current.JsonClassInfo.AddMethodDelegate);
+            var addMethodDelegate = ((Action<TCollection, object?>?)state.Current.JsonTypeInfo.AddMethodDelegate);
             Debug.Assert(addMethodDelegate != null);
             addMethodDelegate((TCollection)state.Current.ReturnValue!, value);
         }
 
         protected override void CreateCollection(ref Utf8JsonReader reader, ref ReadStack state, JsonSerializerOptions options)
         {
-            JsonClassInfo classInfo = state.Current.JsonClassInfo;
-            JsonClassInfo.ConstructorDelegate? constructorDelegate = classInfo.CreateObject;
+            JsonTypeInfo typeInfo = state.Current.JsonTypeInfo;
+            JsonTypeInfo.ConstructorDelegate? constructorDelegate = typeInfo.CreateObject;
 
             if (constructorDelegate == null)
             {
@@ -29,12 +37,7 @@ namespace System.Text.Json.Serialization.Converters
 
             state.Current.ReturnValue = constructorDelegate();
 
-            // Initialize add method used to populate the collection.
-            if (classInfo.AddMethodDelegate == null)
-            {
-                // We verified this exists when we created the converter in the enumerable converter factory.
-                classInfo.AddMethodDelegate = options.MemberAccessorStrategy.CreateAddMethodDelegate<TCollection>();
-            }
+            Debug.Assert(typeInfo.AddMethodDelegate != null);
         }
 
         protected override bool OnWriteResume(Utf8JsonWriter writer, TCollection value, JsonSerializerOptions options, ref WriteStack state)
@@ -71,6 +74,16 @@ namespace System.Text.Json.Serialization.Converters
             } while (enumerator.MoveNext());
 
             return true;
+        }
+
+        internal override bool RequiresDynamicMemberAccessors => true;
+
+        [UnconditionalSuppressMessage("ReflectionAnalysis", "IL2091:UnrecognizedReflectionPattern",
+            Justification = "The ctor is marked RequiresUnreferencedCode.")]
+        internal override void Initialize(JsonSerializerOptions options, JsonTypeInfo? jsonTypeInfo = null)
+        {
+            Debug.Assert(jsonTypeInfo != null);
+            jsonTypeInfo.AddMethodDelegate = options.MemberAccessorStrategy.CreateAddMethodDelegate<TCollection>();
         }
     }
 }

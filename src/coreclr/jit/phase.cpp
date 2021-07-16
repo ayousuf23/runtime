@@ -84,8 +84,9 @@ void Phase::PrePhase()
     //
     // Currently the list is just the set of phases that have custom
     // derivations from the Phase class.
-    static Phases s_allowlist[] = {PHASE_BUILD_SSA, PHASE_RATIONALIZE, PHASE_LOWERING, PHASE_STACK_LEVEL_SETTER};
-    bool          doPrePhase    = false;
+    static Phases s_allowlist[] = {PHASE_BUILD_SSA, PHASE_OPTIMIZE_VALNUM_CSES, PHASE_RATIONALIZE, PHASE_LOWERING,
+                                   PHASE_STACK_LEVEL_SETTER};
+    bool doPrePhase = false;
 
     for (size_t i = 0; i < sizeof(s_allowlist) / sizeof(Phases); i++)
     {
@@ -126,6 +127,10 @@ void Phase::PrePhase()
         }
     }
 #endif // DEBUG
+
+#if DUMP_FLOWGRAPHS
+    comp->fgDumpFlowGraph(m_phase, Compiler::PhasePosition::PrePhase);
+#endif // DUMP_FLOWGRAPHS
 }
 
 //------------------------------------------------------------------------
@@ -157,15 +162,16 @@ void Phase::PostPhase(PhaseStatus status)
     // well as the new-style phases that have been updated to return
     // PhaseStatus from their DoPhase methods.
     //
-    static Phases s_allowlist[] = {PHASE_IMPORTATION,       PHASE_IBCINSTR,
-                                   PHASE_IBCPREP,           PHASE_INCPROFILE,
-                                   PHASE_INDXCALL,          PHASE_MORPH_INLINE,
-                                   PHASE_ALLOCATE_OBJECTS,  PHASE_EMPTY_TRY,
-                                   PHASE_EMPTY_FINALLY,     PHASE_MERGE_FINALLY_CHAINS,
-                                   PHASE_CLONE_FINALLY,     PHASE_MERGE_THROWS,
-                                   PHASE_MORPH_GLOBAL,      PHASE_BUILD_SSA,
-                                   PHASE_RATIONALIZE,       PHASE_LOWERING,
-                                   PHASE_STACK_LEVEL_SETTER};
+    static Phases s_allowlist[] = {PHASE_IMPORTATION,      PHASE_IBCINSTR,
+                                   PHASE_IBCPREP,          PHASE_INCPROFILE,
+                                   PHASE_INDXCALL,         PHASE_MORPH_INLINE,
+                                   PHASE_ALLOCATE_OBJECTS, PHASE_EMPTY_TRY,
+                                   PHASE_EMPTY_FINALLY,    PHASE_MERGE_FINALLY_CHAINS,
+                                   PHASE_CLONE_FINALLY,    PHASE_MERGE_THROWS,
+                                   PHASE_MORPH_GLOBAL,     PHASE_INVERT_LOOPS,
+                                   PHASE_OPTIMIZE_LAYOUT,  PHASE_FIND_LOOPS,
+                                   PHASE_BUILD_SSA,        PHASE_RATIONALIZE,
+                                   PHASE_LOWERING,         PHASE_STACK_LEVEL_SETTER};
 
     if (madeChanges)
     {
@@ -196,10 +202,6 @@ void Phase::PostPhase(PhaseStatus status)
             printf("Trees after %s\n", m_name);
             comp->fgDispBasicBlocks(true);
         }
-
-#if DUMP_FLOWGRAPHS
-        comp->fgDumpFlowGraph(m_phase);
-#endif // DUMP_FLOWGRAPHS
     }
 
     if (doPostPhase)
@@ -228,6 +230,10 @@ void Phase::PostPhase(PhaseStatus status)
     }
 
 #endif // DEBUG
+
+#if DUMP_FLOWGRAPHS
+    comp->fgDumpFlowGraph(m_phase, Compiler::PhasePosition::PostPhase);
+#endif // DUMP_FLOWGRAPHS
 
     comp->EndPhase(m_phase);
 }

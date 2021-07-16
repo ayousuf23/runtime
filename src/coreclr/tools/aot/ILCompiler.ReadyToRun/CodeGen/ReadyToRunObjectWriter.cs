@@ -46,6 +46,12 @@ namespace ILCompiler.DependencyAnalysis
         private readonly EcmaModule _componentModule;
 
         /// <summary>
+        /// Compilation input files. Input files are emitted as perfmap entries and used
+        /// to calculate the output GUID of the ReadyToRun executable for symbol indexation.
+        /// </summary>
+        private readonly IEnumerable<string> _inputFiles;
+
+        /// <summary>
         /// Nodes to emit into the output executable as collected by the dependency analysis.
         /// </summary>
         private readonly IEnumerable<DependencyNode> _nodes;
@@ -101,6 +107,11 @@ namespace ILCompiler.DependencyAnalysis
         private string _perfMapPath;
 
         /// <summary>
+        /// Requested version of the perfmap file format
+        /// </summary>
+        private int _perfMapFormatVersion;
+
+        /// <summary>
         /// If non-zero, the PE file will be laid out such that it can naturally be mapped with a higher alignment than 4KB.
         /// This is used to support loading via large pages on Linux.
         /// </summary>
@@ -127,6 +138,7 @@ namespace ILCompiler.DependencyAnalysis
         public ReadyToRunObjectWriter(
             string objectFilePath,
             EcmaModule componentModule,
+            IEnumerable<string> inputFiles,
             IEnumerable<DependencyNode> nodes,
             NodeFactory factory,
             bool generateMapFile,
@@ -135,12 +147,14 @@ namespace ILCompiler.DependencyAnalysis
             string pdbPath,
             bool generatePerfMapFile,
             string perfMapPath,
+            int perfMapFormatVersion,
             bool generateProfileFile,
             CallChainProfile callChainProfile,
             int customPESectionAlignment)
         {
             _objectFilePath = objectFilePath;
             _componentModule = componentModule;
+            _inputFiles = inputFiles;
             _nodes = nodes;
             _nodeFactory = factory;
             _customPESectionAlignment = customPESectionAlignment;
@@ -150,6 +164,7 @@ namespace ILCompiler.DependencyAnalysis
             _pdbPath = pdbPath;
             _generatePerfMapFile = generatePerfMapFile;
             _perfMapPath = perfMapPath;
+            _perfMapFormatVersion = perfMapFormatVersion;
 
             bool generateMap = (generateMapFile || generateMapCsvFile);
             bool generateSymbols = (generatePdbFile || generatePerfMapFile);
@@ -191,11 +206,7 @@ namespace ILCompiler.DependencyAnalysis
 
                 if (_nodeFactory.CompilationModuleGroup.IsCompositeBuildMode && _componentModule == null)
                 {
-                    headerBuilder = PEHeaderProvider.Create(
-                        imageCharacteristics: Characteristics.ExecutableImage | Characteristics.Dll,
-                        dllCharacteristics: default(DllCharacteristics),
-                        Subsystem.Unknown,
-                        _nodeFactory.Target);
+                    headerBuilder = PEHeaderProvider.Create(Subsystem.Unknown, _nodeFactory.Target);
                     peIdProvider = new Func<IEnumerable<Blob>, BlobContentId>(content => BlobContentId.FromHash(CryptographicHashProvider.ComputeSourceHash(content)));
                     timeDateStamp = null;
                     r2rHeaderExportSymbol = _nodeFactory.Header;
@@ -203,7 +214,7 @@ namespace ILCompiler.DependencyAnalysis
                 else
                 {
                     PEReader inputPeReader = (_componentModule != null ? _componentModule.PEReader : _nodeFactory.CompilationModuleGroup.CompilationModuleSet.First().PEReader);
-                    headerBuilder = PEHeaderProvider.Copy(inputPeReader.PEHeaders, _nodeFactory.Target);
+                    headerBuilder = PEHeaderProvider.Create(inputPeReader.PEHeaders.PEHeader.Subsystem, _nodeFactory.Target);
                     timeDateStamp = inputPeReader.PEHeaders.CoffHeader.TimeDateStamp;
                     r2rHeaderExportSymbol = null;
                 }
@@ -326,6 +337,11 @@ namespace ILCompiler.DependencyAnalysis
 
                 if (_outputInfoBuilder != null)
                 {
+                    foreach (string inputFile in _inputFiles)
+                    {
+                        _outputInfoBuilder.AddInputModule(_nodeFactory.TypeSystemContext.GetModuleFromPath(inputFile));
+                    }
+
                     r2rPeBuilder.AddSections(_outputInfoBuilder);
 
                     if (_generateMapFile)
@@ -358,7 +374,7 @@ namespace ILCompiler.DependencyAnalysis
                         {
                             path = Path.GetDirectoryName(_objectFilePath);
                         }
-                        _symbolFileBuilder.SavePerfMap(path, _objectFilePath);
+                        _symbolFileBuilder.SavePerfMap(path, _perfMapFormatVersion, _objectFilePath, _nodeFactory.Target.OperatingSystem, _nodeFactory.Target.Architecture);
                     }
 
                     if (_profileFileBuilder != null)
@@ -427,6 +443,7 @@ namespace ILCompiler.DependencyAnalysis
         public static void EmitObject(
             string objectFilePath,
             EcmaModule componentModule,
+            IEnumerable<string> inputFiles,
             IEnumerable<DependencyNode> nodes,
             NodeFactory factory,
             bool generateMapFile,
@@ -435,6 +452,7 @@ namespace ILCompiler.DependencyAnalysis
             string pdbPath,
             bool generatePerfMapFile,
             string perfMapPath,
+            int perfMapFormatVersion,
             bool generateProfileFile,
             CallChainProfile callChainProfile,
             int customPESectionAlignment)
@@ -443,6 +461,7 @@ namespace ILCompiler.DependencyAnalysis
             ReadyToRunObjectWriter objectWriter = new ReadyToRunObjectWriter(
                 objectFilePath,
                 componentModule,
+                inputFiles,
                 nodes,
                 factory,
                 generateMapFile: generateMapFile,
@@ -451,6 +470,7 @@ namespace ILCompiler.DependencyAnalysis
                 pdbPath: pdbPath,
                 generatePerfMapFile: generatePerfMapFile,
                 perfMapPath: perfMapPath,
+                perfMapFormatVersion: perfMapFormatVersion,
                 generateProfileFile: generateProfileFile,
                 callChainProfile,
                 customPESectionAlignment);

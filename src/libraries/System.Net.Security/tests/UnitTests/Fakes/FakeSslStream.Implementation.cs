@@ -59,6 +59,8 @@ namespace System.Net.Security
             return Task.Run(() => {});
         }
 
+        private Task RenegotiateAsync(AsyncReadWriteAdapter adapter) => throw new PlatformNotSupportedException();
+
         private void ReturnReadBufferIfEmpty()
         {
         }

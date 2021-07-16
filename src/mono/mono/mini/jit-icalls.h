@@ -56,6 +56,8 @@ ICALL_EXTERN_C gint64 mono_lshr (gint64 a, gint32 shamt);
 // For param_count > 4.
 ICALL_EXTERN_C MonoArray *mono_array_new_n_icall (MonoMethod *cm, gint32 param_count, intptr_t *params);
 
+ICALL_EXTERN_C MonoArray *mono_array_new_2_jagged (MonoMethod *cm, guint32 length1, guint32 length2);
+
 ICALL_EXTERN_C MonoArray *mono_array_new_1 (MonoMethod *cm, guint32 length);
 
 ICALL_EXTERN_C MonoArray *mono_array_new_2 (MonoMethod *cm, guint32 length1, guint32 length2);
@@ -64,7 +66,7 @@ ICALL_EXTERN_C MonoArray *mono_array_new_3 (MonoMethod *cm, guint32 length1, gui
 
 ICALL_EXTERN_C MonoArray *mono_array_new_4 (MonoMethod *cm, guint32 length1, guint32 length2, guint32 length3, guint32 length4);
 
-ICALL_EXTERN_C gpointer mono_class_static_field_address (MonoDomain *domain, MonoClassField *field);
+ICALL_EXTERN_C gpointer mono_class_static_field_address (MonoClassField *field);
 
 ICALL_EXTERN_C gpointer mono_ldtoken_wrapper (MonoImage *image, int token, MonoGenericContext *context);
 
@@ -105,10 +107,6 @@ ICALL_EXTERN_C double mono_conv_to_r8_un (guint32 a);
 ICALL_EXTERN_C double mono_lconv_to_r8_un (guint64 a);
 
 ICALL_EXTERN_C gpointer mono_helper_compile_generic_method (MonoObject *obj, MonoMethod *method, gpointer *this_arg);
-
-ICALL_EXPORT
-MonoString*
-ves_icall_mono_ldstr (MonoDomain *domain, MonoImage *image, guint32 idx);
 
 ICALL_EXTERN_C MonoString *mono_helper_ldstr (MonoImage *image, guint32 idx);
 
@@ -224,6 +222,8 @@ ICALL_EXTERN_C void mono_throw_method_access (MonoMethod *caller, MonoMethod *ca
 ICALL_EXTERN_C void mono_throw_bad_image (void);
 
 ICALL_EXTERN_C void mono_throw_not_supported (void);
+
+ICALL_EXTERN_C void mono_throw_platform_not_supported (void);
 
 ICALL_EXTERN_C void mono_throw_invalid_program (const char *msg);
 
