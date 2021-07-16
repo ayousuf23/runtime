@@ -657,9 +657,9 @@ namespace System.Tests
             yield return new object[] { "1E23", defaultStyle, null, 1E23f };
 
             yield return new object[] { ".234", defaultStyle, null, 0.234f };
-            yield return new object[] { "234.", defaultStyle, null, 234.f };
-            yield return new object[] { "6" + new string('0', 17) + ".", defaultStyle, null, 6E17f };
-            yield return new object[] { "6" + new string('0', 18) + ".", defaultStyle, null, 6E18f };
+            yield return new object[] { "234.", defaultStyle, null, 234.0f };
+            yield return new object[] { new string('0', 14) + "65504" + ".", defaultStyle, null, 65504f };
+            yield return new object[] { new string('0', 15) + "65504" + ".", defaultStyle, null, 65504f };
 
             // 2^11 + 1. Not exactly representable
             yield return new object[] { "2049.0", defaultStyle, invariantFormat, 2048.0f };
